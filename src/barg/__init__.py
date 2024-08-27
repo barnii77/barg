@@ -26,4 +26,3 @@ from .barg_exec_builtins import (
     insert_all_builtins,
     TAKE_BUILTIN_NAME,
 )
-print("HELLO FROM BARG")

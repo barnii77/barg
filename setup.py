@@ -1,10 +1,11 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="barg",
-    version="0.1.0",
+    name="barnii77-barg",
+    version="0.1.2",
     description="Barni's tiny parser grammar for parsing strings/code",
-    packages=find_packages(),
+    packages=find_packages(where="src"),
+    package_dir={"": "src"},
     install_requires=["regex"],
     classifiers=[
         "Programming Language :: Python :: 3",
