@@ -30,7 +30,7 @@ def barg_codegen(args):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    sp = ap.add_subparsers(help="commands")
+    sp = ap.add_subparsers()
     bex = sp.add_parser("exec")
     bcg = sp.add_parser("codegen")
     btest = sp.add_parser("test")
@@ -46,4 +46,7 @@ if __name__ == "__main__":
     bcg.set_defaults(func=barg_codegen)
     btest.set_defaults(func=barg_test)
     args = ap.parse_args()
-    args.func(args)
+    if not hasattr(args, 'func'):
+        print("Invalid usage. Use the -h option for more information.")
+    else:
+        args.func(args)

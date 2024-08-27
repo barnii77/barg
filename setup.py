@@ -5,6 +5,7 @@ setup(
     version="0.1.0",
     description="Barni's tiny parser grammar for parsing strings/code",
     packages=find_packages(),
+    install_requires=["regex"],
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
