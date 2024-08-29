@@ -1,9 +1,103 @@
 import regex
-import barg
 from enum import Enum, auto
-from typing import Iterable, Dict, List, Tuple, Any, Optional, Generator
+from typing import Any, Callable, Dict, Optional, Generator, Iterable, List, Tuple
 
-# TODO python parser code generation
+
+# NOTE: '|Any ' in field so it can be called in non-type-safe way from other places
+def builtin_take(module, m, field: Optional[str] | Any = None):
+    if field is not None and not isinstance(field, str):
+        raise BadGrammarError(
+            f"the field parameter of the take builtin must be an identifier or unprovided, not {type(field)}"
+        )
+    if not hasattr(m, "type_"):
+        raise InternalError("can only apply barg_take builtin to struct or enum type")
+    if m.type_ == GenTyKind.STRUCT:
+        if not field:
+            raise BadGrammarError(
+                "if take is applied to a struct, it takes a field parameter in the form $take(expr, fieldname123) where fieldname123 (without quotes) is the fieldname"
+            )
+        return getattr(m, field)
+    elif m.type_ == GenTyKind.ENUM:
+        return getattr(m, "value")
+    else:
+        raise InternalError("invalid value of 'type_' encountered in take")
+
+
+def builtin_int(module, m):
+    if not isinstance(m, str):
+        raise BadGrammarError(
+            f"the match parameter of the int builtin must be a string match, not type {type(m)}"
+        )
+    return int(m)
+
+
+def builtin_delete(module, m, field: Optional[str] | Any = None):
+    if field is not None and not isinstance(field, str):
+        raise BadGrammarError(
+            f"the field parameter of the delete builtin must be an identifier or unprovided, not {type(field)}"
+        )
+    if not hasattr(m, "type_"):
+        raise InternalError("can only apply barg_take builtin to struct or enum type")
+    if m.type_ == GenTyKind.STRUCT and field:
+        setattr(m, field, None)
+    elif m.type_ == GenTyKind.ENUM:
+        if field and m.tag == field or not field:
+            m.value = None
+    else:
+        raise InternalError("invalid value of 'type_' encountered in delete")
+    return m
+
+
+def builtin_mark(module, m, mark: str):
+    if not mark or not isinstance(mark, str):
+        raise BadGrammarError(
+            f"mark '{mark}' is invalid, mark must be a non-empty string"
+        )
+    setattr(m, f"_mark_{mark}", None)
+    return m
+
+
+def builtin_filter(module, m, mark: str):
+    if not mark or not isinstance(mark, str):
+        raise BadGrammarError(
+            f"mark '{mark}' is invalid, mark must be a non-empty string"
+        )
+    if not isinstance(m, list):
+        raise BadGrammarError(f"filter builtin applied to non-list object {m}")
+    return list(filter(lambda item: hasattr(item, f"_mark_{mark}"), m))
+
+
+def insert_transform(transforms: Dict[str, Any], full_name: str, function: Callable):
+    ns = transforms
+    path = full_name.split(".")
+    for name in path[:-1]:
+        ns = ns.setdefault(name, {})
+    ns[path[-1]] = function
+
+
+def get_transform(transforms: Dict[str, Any], full_name: str) -> Callable:
+    path = full_name.split(".")
+    transform = transforms
+    for name in path:
+        if name not in transform:
+            raise BadGrammarError(f"usage of unknown transform '{full_name}'")
+        transform = transform[name]
+    if not callable(transform):
+        raise InternalError(f"transform {full_name} is a namespace, not a function")
+    return transform
+
+
+def insert_all_builtins(transforms):
+    insert_transform(transforms, TAKE_BUILTIN_NAME, builtin_take)
+    insert_transform(transforms, "builtin.int", builtin_int)
+    insert_transform(transforms, "builtin.delete", builtin_delete)
+    insert_transform(transforms, "builtin.mark", builtin_mark)
+    insert_transform(transforms, "builtin.filter", builtin_filter)
+
+
+TAKE_BUILTIN_NAME = "builtin.take"
+BARG_EXEC_BUILTINS = {}
+insert_all_builtins(BARG_EXEC_BUILTINS)
 
 
 class BadGrammarError(Exception):
@@ -363,7 +457,7 @@ class AstTransform(AstNode):
         return f"AstTransform(name={self.name}, args={self.args})"
 
     def match(self, string: str, module: "ModuleInfo", symbol: Optional[str] = None):
-        transform = barg.get_transform(module.barg_transforms, self.name)
+        transform = get_transform(module.barg_transforms, self.name)
         for pattern_arg, ncons in self.pattern_arg.match(string, module):
             yield transform(module, pattern_arg, *self.args), ncons
 
@@ -564,7 +658,7 @@ class Parser:
         ]
         seq_enum = (
             AstTransform(
-                barg.TAKE_BUILTIN_NAME,
+                TAKE_BUILTIN_NAME,
                 AstEnum(
                     tuple([(f"_{i}", struct) for i, struct in enumerate(seq_structs)])
                 ),
@@ -708,22 +802,8 @@ class Parser:
         return token
 
 
-def parse(
-    strings: Iterable[str],
-    grammar: str,
-    grammar_toplevel_name: str = "Toplevel",
-    barg_exec_transforms=None,
-) -> List[Generator]:
-    if barg_exec_transforms is None:
-        barg_exec_transforms = barg.BARG_EXEC_BUILTINS
-    tokens = Lexer(grammar).tokenize()
+def parse(strings: Iterable[str]) -> List[Generator]:
+    tokens = Lexer(GRAMMAR).tokenize()
     ast = Parser(tokens).parse()
-    module = ModuleInfo(ast, barg_exec_transforms)
-    return [ast.match(string, module, grammar_toplevel_name) for string in strings]
-
-
-def generate_python_parser(
-    barg_source_path: str, grammar: str, grammar_toplevel_name: str
-) -> str:
-    with open(f"{barg_source_path}/barg/_barg_gen_parser_template.py") as f:
-        return f'GRAMMAR = """{grammar}"""\nGRAMMAR_TOPLEVEL_NAME = "{grammar_toplevel_name}"\n\n{f.read()}'
+    module = ModuleInfo(ast, BARG_EXEC_BUILTINS)
+    return [ast.match(string, module, GRAMMAR_TOPLEVEL_NAME) for string in strings]

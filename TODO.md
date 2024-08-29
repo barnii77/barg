@@ -1,7 +1,9 @@
+1. Make actual proper CodeGen kind of like this:
+```py
 import barg
 
 
-class Target:
+class TargetBuilder:
     def __init__(self):
         raise NotImplementedError()
 
@@ -48,9 +50,9 @@ class Target:
         raise NotImplementedError()
 
 
-class PythonTarget(Target):
+class PythonBuilder(TargetBuilder):
     def __init__(self):
-        pass
+        self.class_defs = []
 
     def gen_ast_struct(self, ast: "barg.AstStruct"):
         raise NotImplementedError()
@@ -75,3 +77,4 @@ class PythonTarget(Target):
 
     def gen_ast_toplevel(self, ast: "barg.AstToplevel"):
         raise NotImplementedError()
+```

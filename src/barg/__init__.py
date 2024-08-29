@@ -18,6 +18,7 @@ from .barg_core import (
     ModuleInfo,
     parse,
     GenTyKind,
+    generate_python_parser,
 )
 from .barg_exec_builtins import (
     BARG_EXEC_BUILTINS,
