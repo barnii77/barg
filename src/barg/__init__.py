@@ -10,6 +10,7 @@ from .barg_core import (
     AstToplevel,
     AstAssignment,
     AstTransform,
+    AstTextString,
     InternalError,
     BadGrammarError,
     Token,

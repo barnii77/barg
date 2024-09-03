@@ -1,17 +1,26 @@
+import traceback
 import regex
 import barg
 from enum import Enum, auto
 from typing import Iterable, Dict, List, Tuple, Any, Optional, Generator
 
-# TODO python parser code generation
+# TODO better python parser code generation
 
 
+# It is strongly recommended to pass `None` as the value for parameter `line`.
 class BadGrammarError(Exception):
-    pass
+    def __init__(self, msg: str, line: Optional[int] = None):
+        super().__init__(line, msg)
+        if line is not None:
+            self.__barg_line = line
 
 
+# It is strongly recommended to pass `None` as the value for parameter `line`.
 class InternalError(Exception):
-    pass
+    def __init__(self, msg: str, line: Optional[int] = None):
+        super().__init__(line, msg)
+        if line is not None:
+            self.__barg_line = line
 
 
 class GenTyKind(Enum):
@@ -22,6 +31,9 @@ class GenTyKind(Enum):
 class TokenType(Enum):
     IDENTIFIER = auto()
     STRING = auto()
+    MULTILINE_TEXT_STRING = auto()
+    TEXT_STRING = auto()
+    MULTILINE_STRING = auto()
     ASSIGN = auto()
     STRUCT = auto()
     ENUM = auto()
@@ -47,17 +59,18 @@ class TokenType(Enum):
 
 
 class Token:
-    def __init__(self, type: TokenType, value: str, line: int):
-        self.type = type
+    def __init__(self, type_: TokenType, value: str, line: int):
+        self.type_ = type_
         self.value = value
         self.line = line
 
     def __str__(self):
-        return f"Token(type={self.type}, value='{self.value}', line={self.line})"
+        return f"Token(type={self.type_}, value='{self.value}', line={self.line})"
 
 
 class Lexer:
     def __init__(self, source_code: str):
+        self.errors = []
         self.source_code = source_code
         self._tokens = None
         self.patterns = {
@@ -66,7 +79,10 @@ class Lexer:
             r"\blist\b": TokenType.LIST,
             # do not support _ in last character so I can assume that any values in the generated python parser (eg barg builtin functions) suffixed with _ cannot be shadowed by bad user naming. thus, I force char after _ prefix.
             r"([a-zA-Z]([a-zA-Z0-9_]*[a-zA-Z0-9])?)|(_[a-zA-Z0-9_]*[a-zA-Z0-9])": TokenType.IDENTIFIER,
-            r'".*?[^\\]"': TokenType.STRING,
+            r"```(.|\n)*?[^\\]```": TokenType.MULTILINE_TEXT_STRING,
+            r"`.*?[^\\\n]`": TokenType.TEXT_STRING,
+            r'"""(.|\n)*?[^\\]"""': TokenType.MULTILINE_STRING,
+            r'".*?[^\\\n]"': TokenType.STRING,
             r":=": TokenType.ASSIGN,
             r",": TokenType.COMMA,
             r"\.": TokenType.DOT,
@@ -114,6 +130,10 @@ class Lexer:
                     pos = m.end()
                     break
             if not m:
+                if self.source_code[pos] not in " \n":
+                    self.errors.append(
+                        f"On line {line}: Skipping unexpected character '{self.source_code[pos]}'"
+                    )
                 if self.source_code[pos] == "\n":
                     line += 1
                 pos += 1  # Skipping any unrecognized characters
@@ -129,14 +149,14 @@ class TokenIter:
         self.tokens = tokens
         self.position = 0
 
-    def next(self):
+    def next(self) -> Optional["Token"]:
         if self.position < len(self.tokens):
             token = self.tokens[self.position]
             self.position += 1
             return token
         return None
 
-    def peek(self, n=0):
+    def peek(self, n=0) -> Optional["Token"]:
         if self.position + n < len(self.tokens):
             return self.tokens[self.position + n]
         return None
@@ -145,7 +165,7 @@ class TokenIter:
 class ModuleInfo:
     def __init__(self, toplevel: "AstToplevel", barg_transforms: Dict[str, Any]):
         self.toplevel = toplevel
-        self.definitions: Dict[AstVariable, AstNode] = {
+        self.definitions: Dict[str, AstNode] = {
             ast_assign.identifier: ast_assign.expression
             for ast_assign in toplevel.assignments
         }
@@ -156,6 +176,8 @@ class ModuleInfo:
 
 
 class AstNode:
+    line: int = -1
+
     def __repr__(self):
         return str(self)
 
@@ -175,7 +197,8 @@ class AstNode:
 
 
 class AstAssignment(AstNode):
-    def __init__(self, identifier, expression):
+    def __init__(self, line: int, identifier: str, expression):
+        self.line = line
         self.identifier = identifier
         self.expression = expression
 
@@ -199,16 +222,19 @@ class AstAssignment(AstNode):
 
 
 class AstVariable(AstNode):
-    def __init__(self, name):
+    def __init__(self, line: int, name: str):
+        self.line = line
         self.name = name
 
     def __str__(self):
         return f"AstVariable(name={self.name})"
 
     def match(self, string: str, module: "ModuleInfo", symbol: Optional[str] = None):
-        if self not in module.definitions:
-            raise BadGrammarError(f"usage of undefined variable '{self.name}'")
-        defn = module.definitions[self]
+        if self.name not in module.definitions:
+            raise BadGrammarError(
+                f"usage of undefined variable '{self.name}'", self.line
+            )
+        defn = module.definitions[self.name]
         for m, ncons in defn.match(string, module):
             yield m, ncons
 
@@ -220,7 +246,8 @@ class AstVariable(AstNode):
 
 
 class AstString(AstNode):
-    def __init__(self, value):
+    def __init__(self, line: int, value: str):
+        self.line = line
         self.value = value
 
     def __str__(self):
@@ -231,7 +258,11 @@ class AstString(AstNode):
         if string in module.regex_cache:
             pat = module.regex_cache[str_pat]
         else:
-            pat = regex.compile(str_pat)
+            try:
+                pat = regex.compile(str_pat)
+            except Exception as e:
+                e.__barg_line = self.line
+                raise e
             module.regex_cache[str_pat] = pat
         for m in pat.finditer(string, overlapped=True):
             yield m.group(0), m.end(0)
@@ -244,13 +275,15 @@ class AstString(AstNode):
 
 
 class AstStruct(AstNode):
-    def __init__(self, fields: Tuple[Tuple[str, Any]]):
+    def __init__(self, line: int, fields: Tuple[Tuple[str, Any], ...]):
+        self.line = line
         fields_used = []
         for f in fields:
             fname = f[0]
             if fname in fields_used:
                 raise BadGrammarError(
-                    f"invalid list of fields: field name '{fname}' used multiple times in struct definition"
+                    f"invalid list of fields: field name '{fname}' used multiple times in struct definition",
+                    self.line,
                 )
             else:
                 fields_used.append(fname)
@@ -287,7 +320,11 @@ class BargGeneratedType:
     def __repr__(self):
         return str(self)
 """
-                exec(code, g)
+                try:
+                    exec(code, g)
+                except Exception as e:
+                    e.__barg_line = self.line
+                    raise e
                 typ = g["BargGeneratedType"]
                 module.generated_types[self] = typ
             else:
@@ -313,7 +350,8 @@ class BargGeneratedType:
 
 
 class AstEnum(AstNode):
-    def __init__(self, variants: Tuple[Tuple[str, Any]]):
+    def __init__(self, line: int, variants: Tuple[Tuple[str, Any], ...]):
+        self.line = line
         self.variants = variants  # variants is a list of (tag, expression) tuples
 
     def __str__(self):
@@ -336,7 +374,11 @@ class BargGeneratedType:
     def __repr__(self):
         return str(self)
 """
-            exec(code, g)
+            try:
+                exec(code, g)
+            except Exception as e:
+                e.__barg_line = self.line  # attach barg grammar line info
+                raise e
             typ: Any = g["BargGeneratedType"]
             module.generated_types[self] = typ
         else:
@@ -354,7 +396,8 @@ class BargGeneratedType:
 
 
 class AstTransform(AstNode):
-    def __init__(self, name, pattern_arg, args: Tuple[str | int] = tuple()):
+    def __init__(self, line: int, name, pattern_arg, args: Tuple[str | int] = tuple()):
+        self.line = line
         self.name = name
         self.pattern_arg = pattern_arg
         self.args = args
@@ -365,7 +408,11 @@ class AstTransform(AstNode):
     def match(self, string: str, module: "ModuleInfo", symbol: Optional[str] = None):
         transform = barg.get_transform(module.barg_transforms, self.name)
         for pattern_arg, ncons in self.pattern_arg.match(string, module):
-            yield transform(module, pattern_arg, *self.args), ncons
+            try:
+                yield transform(module, pattern_arg, *self.args), ncons
+            except Exception as e:
+                e.__barg_line = self.line  # attach barg grammar line info
+                raise e
 
     def __hash__(self):
         return hash((self.name, self.pattern_arg, self.args))
@@ -379,7 +426,8 @@ class AstTransform(AstNode):
 
 
 class AstList(AstNode):
-    def __init__(self, range_start, range_end, mode, expression):
+    def __init__(self, line: int, range_start, range_end, mode, expression):
+        self.line = line
         if mode not in ("greedy", "lazy"):
             raise BadGrammarError(
                 "unknown list matching mode '" + mode + "': modes are 'greedy', 'lazy'"
@@ -437,16 +485,17 @@ class AstList(AstNode):
 
 
 class AstToplevel(AstNode):
-    def __init__(self, statements: Tuple[AstAssignment | AstNode]):
+    def __init__(self, line: int, statements: Tuple[AstAssignment | AstNode]):
+        self.line = line
         assignments = []
         n = 0
         for stmt in statements:
             if isinstance(stmt, AstAssignment):
                 assignments.append(stmt)
             else:
-                assignments.append(AstAssignment(f"_{n}", stmt))
+                assignments.append(AstAssignment(stmt.line, f"_{n}", stmt))
                 n += 1
-        self.assignments = assignments
+        self.assignments: List[AstAssignment] = assignments
 
     def __str__(self) -> str:
         return f"AstToplevel(assignments={self.assignments})"
@@ -456,12 +505,13 @@ class AstToplevel(AstNode):
             raise ValueError(
                 "match function of AstToplevel requires symbol (str) which represents the pattern to match the string against"
             )
-        expr = module.definitions[AstVariable(symbol)]
+        if symbol not in module.definitions:
+            raise InternalError(
+                f"specified toplevel symbol is not defined: '{symbol}'", -1
+            )
+        expr = module.definitions[symbol]
         for m, ncons in expr.match(string, module):
             yield m, ncons
-
-    def __iter__(self):
-        return iter(self.assignments)
 
     def __hash__(self):
         return hash((self.assignments,))
@@ -470,10 +520,17 @@ class AstToplevel(AstNode):
         return isinstance(other, AstToplevel) and self.assignments == other.assignments
 
 
+class AstTextString(AstNode):
+    def __init__(self, line: int, value: str):
+        self.line = line
+        self.value = value
+
+
 class Parser:
     def __init__(self, tokens):
         self.tokens = TokenIter(tokens)
         self.ast = None
+        self.errors = []
 
     def parse(self):
         if self.ast is None:
@@ -481,22 +538,40 @@ class Parser:
             while self.tokens.peek():
                 try:
                     assignments.append(self.parse_assignment())
-                except Exception:
-                    pass
-            self.ast = AstToplevel(tuple(assignments))
+                except Exception as e:
+                    token = self.tokens.peek()
+                    if token:
+                        self.errors.append(
+                            f"On line {token.line}: {e}\nPython {traceback.format_exc()}"
+                        )
+                    else:
+                        self.errors.append(
+                            f"End of file: {e}\nPython {traceback.format_exc()}"
+                        )
+                    # consume until next statement
+                    while (
+                        self.tokens.peek()
+                        and self.tokens.next().type_ != TokenType.SEMICOLON
+                    ):
+                        pass
+            self.ast = AstToplevel(0, tuple(assignments))
         return self.ast
 
     def parse_assignment(self):
         if (
             self.tokens.peek(1)
-            and self.tokens.peek().type == TokenType.IDENTIFIER
-            and self.tokens.peek(1).type == TokenType.ASSIGN
+            and self.tokens.peek().type_ == TokenType.IDENTIFIER
+            and self.tokens.peek(1).type_ == TokenType.ASSIGN
         ):
-            identifier = self.tokens.next()
-            self.tokens.next()
+            identifier = self.expect(TokenType.IDENTIFIER)
+            self.expect(TokenType.ASSIGN)
             expression = self.parse_expression()
             self.expect(TokenType.SEMICOLON)
-            return AstAssignment(AstVariable(identifier.value), expression)
+            return AstAssignment(
+                identifier.line,
+                identifier.value,
+                expression,
+            )
         else:
             expression = self.parse_expression()
             self.expect(TokenType.SEMICOLON)
@@ -504,52 +579,54 @@ class Parser:
 
     def parse_expression(self):
         seqs = [[self.parse_atomic_expression()]]
-        while (token := self.tokens.peek()) and token.type not in (
+        while (token := self.tokens.peek()) and token.type_ not in (
             TokenType.COMMA,
             TokenType.SEMICOLON,
             TokenType.RBRACE,
             TokenType.RPAREN,
         ):
-            if token.type == TokenType.ASTERISK:
+            if token.type_ == TokenType.ASTERISK:
                 self.tokens.next()
                 seqs[-1].append(
                     AstList(
+                        token.line,
                         0,
                         None,
                         "lazy"
                         if self.tokens.peek()
-                        and self.tokens.peek().type == TokenType.QUESTION
+                        and self.tokens.peek().type_ == TokenType.QUESTION
                         and self.tokens.next()
                         else "greedy",
                         seqs[-1].pop(),
                     )
                 )
-            elif token.type == TokenType.PLUS:
+            elif token.type_ == TokenType.PLUS:
                 self.tokens.next()
                 seqs[-1].append(
                     AstList(
+                        token.line,
                         1,
                         None,
                         "lazy"
                         if self.tokens.peek()
-                        and self.tokens.peek().type == TokenType.QUESTION
+                        and self.tokens.peek().type_ == TokenType.QUESTION
                         and self.tokens.next()
                         else "greedy",
                         seqs[-1].pop(),
                     )
                 )
-            elif token.type == TokenType.QUESTION:
+            elif token.type_ == TokenType.QUESTION:
                 self.tokens.next()
-                seqs[-1].append(AstList(0, 1, "greedy", seqs[-1].pop()))
-            elif token.type == TokenType.LBRACE:
+                seqs[-1].append(AstList(token.line, 0, 1, "greedy", seqs[-1].pop()))
+            elif token.type_ == TokenType.LBRACE:
                 self.tokens.next()
-                n = int(self.expect(TokenType.NUMBER))
+                n = int(self.expect(TokenType.NUMBER).value)
                 self.expect(TokenType.RBRACE)
-                seqs[-1].append(AstList(n, n, "greedy", seqs[-1].pop()))
-            elif token.type == TokenType.BAR:
+                seqs[-1].append(AstList(token.line, n, n, "greedy", seqs[-1].pop()))
+            elif token.type_ == TokenType.BAR:
                 self.tokens.next()
                 seqs.append([self.parse_atomic_expression()])
-            elif token.type == TokenType.LPAREN:
+            elif token.type_ == TokenType.LPAREN:
                 self.tokens.next()
                 seqs[-1].append(self.parse_expression())
                 self.expect(TokenType.RPAREN)
@@ -557,16 +634,21 @@ class Parser:
                 seqs[-1].append(self.parse_atomic_expression())
 
         seq_structs = [
-            AstStruct(tuple([(f"_{i}", seqs[j][i]) for i in range(len(seqs[j]))]))
+            AstStruct(
+                token.line if token else -1,
+                tuple([(f"_{i}", seqs[j][i]) for i in range(len(seqs[j]))]),
+            )
             if len(seqs[j]) > 1
             else seqs[j][0]
             for j in range(len(seqs))
         ]
         seq_enum = (
             AstTransform(
+                token.line if token else -1,
                 barg.TAKE_BUILTIN_NAME,
                 AstEnum(
-                    tuple([(f"_{i}", struct) for i, struct in enumerate(seq_structs)])
+                    token.line if token else -1,
+                    tuple([(f"_{i}", struct) for i, struct in enumerate(seq_structs)]),
                 ),
             )
             if len(seqs) > 1
@@ -575,29 +657,40 @@ class Parser:
         return seq_enum
 
     def parse_atomic_expression(self):
-        token = self.tokens.peek()
-        if token.type == TokenType.STRING:
+        token: Optional[Token] = self.tokens.peek()
+        if token is None:
+            raise BadGrammarError("expected expression", -1)
+        if token.type_ == TokenType.STRING:
             self.tokens.next()
-            return AstString(token.value[1:-1])  # cut off quotes
-        elif token.type == TokenType.IDENTIFIER:
+            return AstString(token.line, token.value[1:-1])
+        elif token.type_ == TokenType.MULTILINE_STRING:
             self.tokens.next()
-            return AstVariable(token.value)
-        elif token.type == TokenType.STRUCT:
+            return AstString(token.line, token.value[3:-3])
+        elif token.type_ == TokenType.TEXT_STRING:
+            self.tokens.next()
+            return AstTextString(token.line, token.value[1:-1])
+        elif token.type_ == TokenType.MULTILINE_TEXT_STRING:
+            self.tokens.next()
+            return AstTextString(token.line, token.value[3:-3])
+        elif token.type_ == TokenType.IDENTIFIER:
+            self.tokens.next()
+            return AstVariable(token.line, token.value)
+        elif token.type_ == TokenType.STRUCT:
             return self.parse_struct()
-        elif token.type == TokenType.ENUM:
+        elif token.type_ == TokenType.ENUM:
             return self.parse_enum()
-        elif token.type == TokenType.LIST:
+        elif token.type_ == TokenType.LIST:
             return self.parse_list()
-        elif token.type == TokenType.DOLLAR:
+        elif token.type_ == TokenType.DOLLAR:
             return self.parse_transform_call()
         else:
-            raise BadGrammarError(f"Unexpected token: {token}")
+            raise BadGrammarError(f"Unexpected token: {token}", token.line)
 
     def parse_transform_call(self):
-        self.expect(TokenType.DOLLAR)
+        dollar = self.expect(TokenType.DOLLAR)
 
         transform_path = [self.expect(TokenType.IDENTIFIER).value]
-        while (token := self.tokens.peek()) and token.type == TokenType.DOT:
+        while (token := self.tokens.peek()) and token.type_ == TokenType.DOT:
             self.tokens.next()
             transform_path.append(self.expect(TokenType.IDENTIFIER).value)
 
@@ -607,30 +700,37 @@ class Parser:
 
         args = []
         while (
-            token and token.type != TokenType.RPAREN and (token := self.tokens.next())
+            token and token.type_ != TokenType.RPAREN and (token := self.tokens.next())
         ):
-            if token.type == TokenType.NUMBER:
+            if token.type_ == TokenType.NUMBER:
                 args.append(int(token.value))
-            elif token.type == TokenType.IDENTIFIER:
+            elif token.type_ == TokenType.IDENTIFIER:
                 args.append(token.value)
+            elif token.type_ == TokenType.MULTILINE_TEXT_STRING:
+                args.append(AstTextString(token.line, token.value[3:-3]))
+            elif token.type_ == TokenType.TEXT_STRING:
+                args.append(AstTextString(token.line, token.value[1:-1]))
             else:
                 raise BadGrammarError(
-                    "unexpected type of token for transform args: first arg must be pattern, the rest must be identifiers or integers"
+                    "unexpected type of token for transform args: first arg must be pattern, the rest must be identifiers or integers",
+                    token.line,
                 )
             token = self.expect_one_of(TokenType.RPAREN, TokenType.COMMA)
 
-        return AstTransform(".".join(transform_path), pattern_arg, tuple(args))
+        return AstTransform(
+            dollar.line, ".".join(transform_path), pattern_arg, tuple(args)
+        )
 
     def parse_struct(self):
-        self.expect(TokenType.STRUCT)
+        struct_kwd = self.expect(TokenType.STRUCT)
         fields = []
         self.expect(TokenType.LBRACE)
-        while self.tokens.peek() and self.tokens.peek().type != TokenType.RBRACE:
+        while self.tokens.peek() and self.tokens.peek().type_ != TokenType.RBRACE:
             # if no name is provided, make it "_n" where n is the first unsigned number not already used
             if (
                 self.tokens.peek(1)
-                and self.tokens.peek().type == TokenType.IDENTIFIER
-                and self.tokens.peek(1).type == TokenType.COLON
+                and self.tokens.peek().type_ == TokenType.IDENTIFIER
+                and self.tokens.peek(1).type_ == TokenType.COLON
             ):
                 fieldname = self.expect(TokenType.IDENTIFIER).value
                 self.expect(TokenType.COLON)
@@ -642,21 +742,21 @@ class Parser:
 
             expression = self.parse_expression()
             fields.append((fieldname, expression))
-            if self.tokens.peek() and self.tokens.peek().type == TokenType.COMMA:
+            if self.tokens.peek() and self.tokens.peek().type_ == TokenType.COMMA:
                 self.tokens.next()
         self.expect(TokenType.RBRACE)
-        return AstStruct(tuple(fields))
+        return AstStruct(struct_kwd.line, tuple(fields))
 
     def parse_enum(self):
-        self.expect(TokenType.ENUM)
+        enum_kwd = self.expect(TokenType.ENUM)
         variants = []
         self.expect(TokenType.LBRACE)
-        while self.tokens.peek() and self.tokens.peek().type != TokenType.RBRACE:
+        while self.tokens.peek() and self.tokens.peek().type_ != TokenType.RBRACE:
             # if no name is provided, make it "_n" where n is the first unsigned number not already used
             if (
                 self.tokens.peek(1)
-                and self.tokens.peek().type == TokenType.IDENTIFIER
-                and self.tokens.peek(1).type == TokenType.COLON
+                and self.tokens.peek().type_ == TokenType.IDENTIFIER
+                and self.tokens.peek(1).type_ == TokenType.COLON
             ):
                 tag = self.expect(TokenType.IDENTIFIER).value
                 self.expect(TokenType.COLON)
@@ -668,16 +768,16 @@ class Parser:
 
             expression = self.parse_expression()
             variants.append((tag, expression))
-            if self.tokens.peek() and self.tokens.peek().type == TokenType.COMMA:
+            if self.tokens.peek() and self.tokens.peek().type_ == TokenType.COMMA:
                 self.tokens.next()
         self.expect(TokenType.RBRACE)
-        return AstEnum(tuple(variants))
+        return AstEnum(enum_kwd.line, tuple(variants))
 
     def parse_list(self):
         mode = "greedy"
-        self.expect(TokenType.LIST)
+        list_kwd = self.expect(TokenType.LIST)
         self.expect(TokenType.LBRACKET)
-        if (token := self.tokens.peek()) and token.type == TokenType.IDENTIFIER:
+        if (token := self.tokens.peek()) and token.type_ == TokenType.IDENTIFIER:
             self.tokens.next()
             mode = token.value
         range_start = int(self.expect(TokenType.NUMBER).value)
@@ -685,7 +785,7 @@ class Parser:
 
         self.expect(TokenType.DOT)
         self.expect(TokenType.DOT)
-        if self.tokens.peek() and self.tokens.peek().type == TokenType.NUMBER:
+        if self.tokens.peek() and self.tokens.peek().type_ == TokenType.NUMBER:
             range_end = int(self.tokens.next().value)
 
         self.expect(TokenType.RBRACKET)
@@ -693,37 +793,89 @@ class Parser:
         expression = self.parse_expression()
         self.expect(TokenType.RBRACE)
 
-        return AstList(range_start, range_end, mode, expression)
+        return AstList(list_kwd.line, range_start, range_end, mode, expression)
 
     def expect(self, token_type):
-        token = self.tokens.next()
-        if not token or token.type != token_type:
-            raise BadGrammarError(f"Expected token type {token_type}, but got {token}")
+        token = self.tokens.peek()
+        if not token or token.type_ != token_type:
+            raise BadGrammarError(
+                f"Expected token type {token_type}, but got {token}",
+                token.line if token else -1,
+            )
+        self.tokens.next()
         return token
 
     def expect_one_of(self, *token_types):
-        token = self.tokens.next()
-        if not token or token.type not in token_types:
-            raise BadGrammarError(f"Expected one of {token_types}, but got {token}")
+        token = self.tokens.peek()
+        if not token or token.type_ not in token_types:
+            raise BadGrammarError(
+                f"Expected one of {token_types}, but got {token}",
+                token.line if token else -1,
+            )
+        self.tokens.next()
         return token
 
 
 def parse(
     strings: Iterable[str],
     grammar: str,
+    error_out: List[str],
     grammar_toplevel_name: str = "Toplevel",
     barg_exec_transforms=None,
-) -> List[Generator]:
+) -> List[Generator | Exception]:
     if barg_exec_transforms is None:
         barg_exec_transforms = barg.BARG_EXEC_BUILTINS
-    tokens = Lexer(grammar).tokenize()
-    ast = Parser(tokens).parse()
+    lexer = Lexer(grammar)
+    tokens = lexer.tokenize()
+    error_out.extend(lexer.errors)
+    parser = Parser(tokens)
+    ast = parser.parse()
+    error_out.extend(parser.errors)
     module = ModuleInfo(ast, barg_exec_transforms)
-    return [ast.match(string, module, grammar_toplevel_name) for string in strings]
+    out = []
+    for string in strings:
+        try:
+            out.append(ast.match(string, module, grammar_toplevel_name))
+        except Exception as e:
+            error_out.append(
+                f"On line {e.__barg_line if hasattr(e, '__barg_line') and e.__barg_line != -1 else '<unknown/eof>'}: {e}\nPython {traceback.format_exc()}"
+            )
+            out.append(Exception("parsing failed"))
+    return out
 
 
 def generate_python_parser(
     barg_source_path: str, grammar: str, grammar_toplevel_name: str
 ) -> str:
-    with open(f"{barg_source_path}/barg/_barg_gen_parser_template.py") as f:
-        return f'GRAMMAR = """{grammar}"""\nGRAMMAR_TOPLEVEL_NAME = "{grammar_toplevel_name}"\n\n{f.read()}'
+    code = f'GRAMMAR = """{grammar}"""\nGRAMMAR_TOPLEVEL_NAME = "{grammar_toplevel_name}"\n\n'
+    with open(f"{barg_source_path}/barg/barg_exec_builtins.py") as f:
+        code += f.read() + "\n\n"
+    with open(f"{barg_source_path}/barg/barg_core.py") as f:
+        code += f.read() + "\n\n"
+    code += """
+def parse(
+    strings: Iterable[str],
+    error_out: List[str],
+    barg_exec_transforms=None,
+) -> List[Generator | Exception]:
+    if barg_exec_transforms is None:
+        barg_exec_transforms = barg.BARG_EXEC_BUILTINS
+    lexer = Lexer(GRAMMAR)
+    tokens = lexer.tokenize()
+    error_out.extend(lexer.errors)
+    parser = Parser(tokens)
+    ast = parser.parse()
+    error_out.extend(parser.errors)
+    module = ModuleInfo(ast, barg_exec_transforms)
+    out = []
+    for string in strings:
+        try:
+            out.append(ast.match(string, module, GRAMMAR_TOPLEVEL_NAME))
+        except Exception as e:
+            error_out.append(
+                f"On line {e.__barg_line if hasattr(e, '__barg_line') and e.__barg_line != -1 else '<unknown/eof>'}: {e}\\nPython {traceback.format_exc()}"
+            )
+            out.append(Exception("parsing failed"))
+    return out
+"""
+    return code

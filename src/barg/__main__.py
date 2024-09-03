@@ -5,7 +5,7 @@ import barg
 
 def barg_test(args):
     print(
-        "Please use `python -m unittest barg.tests` to run all unit-tests. To run only a subset of all tests, use `barg.tests.{Exec,CodeGen}` or `barg.tests.{Exec,CodeGen}.test123`. Example: `python -m unittest barg.tests.Exec.test1`."
+        "Please use `PYTHONPATH=src python -m unittest barg.tests` to run all unit-tests from the barg project root directory. To run them for the installed package, use `python -m unittest barg.tests`. To run only a subset of all tests, use `barg.tests.{Exec,CodeGen}` or `barg.tests.{Exec,CodeGen}.test123`. Example: `python -m unittest barg.tests.Exec.test1`."
     )
 
 
@@ -20,8 +20,14 @@ def barg_exec(args):
         text = f.read()
     with open(args.grammar) as f:
         grammar = f.read()
-    m = next(barg.parse((text,), grammar, args.toplevel_name)[0])[0]
-    print(m)
+    errs = []
+    g = barg.parse((text,), grammar, errs, args.toplevel_name)[0]
+    if isinstance(g, Exception):
+        nl = "\n"
+        print(f"FAILED! Error: {g};\nErrors: {nl.join(errs)}")
+    else:
+        m = next(g)[0]
+        print(m)
 
 
 def barg_codegen(args):

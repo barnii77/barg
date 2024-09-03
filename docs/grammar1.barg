@@ -6,18 +6,36 @@ Var := struct {
     name: "[a-zA-Z_][a-zA-Z0-9_]*"
 };
 
-$builtin.int(Int);
+$builtin.int("""\d+""");
 
-Recovery := ".*?;\\s*\\n*\\s*";  # smart recovery pattern (what to skip if no match)
+Recovery := ".*?;\s*\n*\s*";  # smart recovery pattern (what to skip if no match)
 
-Expr := Int | Var;  # tests union composition syntax sugar
+# you can also assign text strings to variables if you need to apply python code multiple times (to reduce repetition)
+PyCode := ```
+# This python code will be executed on the match. variables:
+# "x" refers to the match (first required transformation argument)
+# "args" refers to the other arguments as a tuple
+# "module" refers to the barg.ModuleInfo object containing toplevel variable definitions
+# "barg" is the barg library.
+# To update the match to a completely different value (eg to convert a string match of str type storing a float to float type), you can reassign "x" to whatever you want the updated value to be.
+# Once the code is done running, the final value of the x variable will be extracted from the globals of this code and will be considered the transformed match.
+if x.type_ == barg.GenTyKind.STRUCT:
+    x._PYSCRIPT_RAN_SUCCESSFULLY = True
+else:
+    raise Exception("matched pattern is not of type struct")
+```;
+
+# tests union composition syntax sugar and the pyscript builtin
+Expr := $builtin.pyscript(Int | Var, PyCode);
+
+Equals := "\s*=\s*";
 
 # marks as ok if match was found for non-recovery pattern
 Assignment := $builtin.mark(struct {
     var: Var,
-    "\\s*=\\s*",
+    Equals,
     expr: Expr,
-    ";" "\\s*(\\n)*\\s*",  # tests sequence composition syntax sugar
+    ";" "\s*(\n)*\s*",  # tests sequence composition syntax sugar
 }, ok) | Recovery;
 
 # filters out those matches that were not ok (skipped parts due to recovery)

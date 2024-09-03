@@ -19,3 +19,6 @@ parse the file using some grammar: `python -m barg exec file.abc -g grammar.barg
 run unit tests: `python -m unittest barg.tests`.
 
 if you are trying to run the source code directly without installing it, you will have to set PYTHONPATH=src. eg `PYTHONPATH=src python -m barg --help`
+
+# grammar docs
+who needs those again? lol... you can find an example grammar in `docs/grammar1.barg`. it's pretty exhaustive, any other features that are not used there can be read at `src/barg/barg_exec_builtins.py -> insert_all_builtins()` and `src/barg/barg_core.py -> class Lexer`.
