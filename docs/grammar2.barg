@@ -1,0 +1,70 @@
+# This grammar uses syntax sugar where you really shouldn't use it, since the syntax sugar auto-generates bad field names and no enum tags.
+# In an actual language parser, you should replace some of the (a | b) patterns with explicit enums and some of the (a b) sequences with structs.
+# This is what the "language" parsed looks like:
+# a := 4
+# x := 2 * 3 + 4
+# y := (z := x * 4 + 5) / x * a
+
+Int := struct {
+  value: $builtin.int("\d+")
+};
+
+Var := struct {
+  name: "[a-zA-Z_][a-zA-Z_0-9]*"
+};
+
+Term := Int | Var | "\(" AssignableExpr "\)";
+
+PointOpTerm := Term;
+LineOpTerm := Term | PointOp;
+
+AddOp := struct {
+  a: LineOpTerm,
+  "\s*",
+  op: "\+",
+  "\s*",
+  b: Expr
+};
+
+SubOp := struct {
+  a: LineOpTerm,
+  "\s*",
+  op: "-",
+  "\s*",
+  b: Expr
+};
+
+MulOp := struct {
+  a: PointOpTerm,
+  "\s*",
+  op: "\*",
+  "\s*",
+  b: PointOpTerm | PointOp
+};
+
+DivOp := struct {
+  a: PointOpTerm,
+  "\s*",
+  op: "/",
+  "\s*",
+  b: PointOpTerm | PointOp
+};
+
+ModOp := struct {
+  a: PointOpTerm,
+  "\s*",
+  op: "%",
+  "\s*",
+  b: PointOpTerm | PointOp
+};
+
+PointOp := MulOp | DivOp | ModOp;
+
+LineOp := AddOp | SubOp;
+
+Expr := PointOp | LineOp | Term;
+
+AssignableExpr := (Var "\s*:=\s*")? Expr;
+
+Statement := AssignableExpr "\s*\n\s*";
+Toplevel := Statement*;

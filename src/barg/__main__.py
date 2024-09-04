@@ -1,4 +1,5 @@
 import os
+import traceback
 import argparse
 import barg
 
@@ -10,6 +11,7 @@ def barg_test(args):
 
 
 def barg_exec(args):
+    barg.DEBUG = True
     if not os.path.exists(args.text_file) or not os.path.isfile(args.text_file):
         print("Could not find file " + args.text_file)
         return
@@ -26,8 +28,13 @@ def barg_exec(args):
         nl = "\n"
         print(f"FAILED! Error: {g};\nErrors: {nl.join(errs)}")
     else:
-        m = next(g)[0]
-        print(m)
+        try:
+            m = next(g)[0]
+            print(m)
+        except Exception as e:
+            errs.append(
+                f"On line {e.__barg_line if hasattr(e, '__barg_line') and e.__barg_line != -1 else '<unknown/eof>'}: {e}\nPython {traceback.format_exc()}"
+            )
 
 
 def barg_codegen(args):

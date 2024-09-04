@@ -1,10 +1,69 @@
 import traceback
+import warnings
+import functools
 import regex
 import barg
 from enum import Enum, auto
 from typing import Iterable, Dict, List, Tuple, Any, Optional, Generator
 
 # TODO better python parser code generation
+
+ENABLE_DEBUG_FEATURE = True
+
+
+def get_callstack():
+    return "\n".join(traceback.format_stack())
+
+
+# decorator that logs all args that have been passed to a function and if there is an exact match,
+# it diagnoses it as an infinite loop and prints a warning
+def ast_cls_attempt_inf_loop_diagnosis_decorator_builder(
+    enable_debug_feature: bool = ENABLE_DEBUG_FEATURE,
+):
+    # TODO store the call stack (str repr) alongside the prev_args (store each unique pair) and check if it has changed since then. if it hasn't (no backtrack in matching process, only descent), flag pot inf loop
+    if enable_debug_feature:
+
+        def ast_cls_attempt_inf_loop_diagnosis(cls):
+            if not hasattr(cls, "match") or not callable(cls.match):
+                raise RuntimeError(
+                    "ast_cls_attempt_inf_loop_diagnosis class decorator applied to non-AstNode class"
+                )
+
+            prev_args_and_call_stack = []
+            match_func = cls.match
+
+            @functools.wraps(cls.match)
+            def match_wrapper(*args):
+                if barg.DEBUG:
+                    cs = get_callstack()
+                    for prev_args, prev_cs in prev_args_and_call_stack:
+                        if args == prev_args and not all(
+                            map(lambda a, b: a == b, cs, prev_cs)
+                        ):
+                            # print(args)
+                            warnings.warn(
+                                f"Potential infinitely recursing definition detected. Match function of class {cls} called with the same arguments {args} multiple times. Might indicate that nothing is getting consumed and you are therefore stuck in an infinite loop. This indicates a semantic problem in your grammar. More specifically, it can indicate that the first field of a struct / value of an enum matches the struct/enum itself, meaning, since the sub-struct/enum match is executed on the same text as its parent, that no progress can be made."
+                            )
+                    prev_args_and_call_stack.append((args, cs))
+                return match_func(*args)
+
+            cls.match = match_wrapper
+
+            raise NotImplementedError(
+                f"The inf loop diagnosis feature is not yet implemented. Please disable ENABLE_DEBUG_FEATURE in barg_core.py!"
+            )
+            # return cls
+
+    else:
+
+        def ast_cls_attempt_inf_loop_diagnosis(cls):
+            if not hasattr(cls, "match") or not callable(cls.match):
+                raise RuntimeError(
+                    "ast_cls_attempt_inf_loop_diagnosis class decorator applied to non-AstNode class"
+                )
+            return cls
+
+    return ast_cls_attempt_inf_loop_diagnosis
 
 
 # It is strongly recommended to pass `None` as the value for parameter `line`.
@@ -196,6 +255,7 @@ class AstNode:
         raise NotImplementedError()
 
 
+@ast_cls_attempt_inf_loop_diagnosis_decorator_builder()
 class AstAssignment(AstNode):
     def __init__(self, line: int, identifier: str, expression):
         self.line = line
@@ -221,6 +281,7 @@ class AstAssignment(AstNode):
         ) == (other.identifier, other.expression)
 
 
+@ast_cls_attempt_inf_loop_diagnosis_decorator_builder()
 class AstVariable(AstNode):
     def __init__(self, line: int, name: str):
         self.line = line
@@ -245,6 +306,7 @@ class AstVariable(AstNode):
         return isinstance(other, AstVariable) and self.name == other.name
 
 
+@ast_cls_attempt_inf_loop_diagnosis_decorator_builder()
 class AstString(AstNode):
     def __init__(self, line: int, value: str):
         self.line = line
@@ -274,6 +336,7 @@ class AstString(AstNode):
         return isinstance(other, AstString) and self.value == other.value
 
 
+@ast_cls_attempt_inf_loop_diagnosis_decorator_builder()
 class AstStruct(AstNode):
     def __init__(self, line: int, fields: Tuple[Tuple[str, Any], ...]):
         self.line = line
@@ -349,6 +412,7 @@ class BargGeneratedType:
         return isinstance(other, AstStruct) and self.fields == other.fields
 
 
+@ast_cls_attempt_inf_loop_diagnosis_decorator_builder()
 class AstEnum(AstNode):
     def __init__(self, line: int, variants: Tuple[Tuple[str, Any], ...]):
         self.line = line
@@ -395,6 +459,7 @@ class BargGeneratedType:
         return isinstance(other, AstEnum) and self.variants == other.variants
 
 
+@ast_cls_attempt_inf_loop_diagnosis_decorator_builder()
 class AstTransform(AstNode):
     def __init__(self, line: int, name, pattern_arg, args: Tuple[str | int] = tuple()):
         self.line = line
@@ -425,6 +490,7 @@ class AstTransform(AstNode):
         ) == (other.name, other.pattern_arg, other.args)
 
 
+@ast_cls_attempt_inf_loop_diagnosis_decorator_builder()
 class AstList(AstNode):
     def __init__(self, line: int, range_start, range_end, mode, expression):
         self.line = line
@@ -484,6 +550,7 @@ class AstList(AstNode):
         ) == (other.mode, other.range_start, other.range_end, other.expression)
 
 
+@ast_cls_attempt_inf_loop_diagnosis_decorator_builder()
 class AstToplevel(AstNode):
     def __init__(self, line: int, statements: Tuple[AstAssignment | AstNode]):
         self.line = line
@@ -520,6 +587,7 @@ class AstToplevel(AstNode):
         return isinstance(other, AstToplevel) and self.assignments == other.assignments
 
 
+@ast_cls_attempt_inf_loop_diagnosis_decorator_builder()
 class AstTextString(AstNode):
     def __init__(self, line: int, value: str):
         self.line = line
@@ -617,12 +685,12 @@ class Parser:
                 )
             elif token.type_ == TokenType.QUESTION:
                 self.tokens.next()
-                seqs[-1].append(AstList(token.line, 0, 1, "greedy", seqs[-1].pop()))
+                seqs[-1].append(AstList(token.line, 0, 2, "greedy", seqs[-1].pop()))
             elif token.type_ == TokenType.LBRACE:
                 self.tokens.next()
                 n = int(self.expect(TokenType.NUMBER).value)
                 self.expect(TokenType.RBRACE)
-                seqs[-1].append(AstList(token.line, n, n, "greedy", seqs[-1].pop()))
+                seqs[-1].append(AstList(token.line, n, n + 1, "greedy", seqs[-1].pop()))
             elif token.type_ == TokenType.BAR:
                 self.tokens.next()
                 seqs.append([self.parse_atomic_expression()])
@@ -683,6 +751,11 @@ class Parser:
             return self.parse_list()
         elif token.type_ == TokenType.DOLLAR:
             return self.parse_transform_call()
+        elif token.type_ == TokenType.LPAREN:
+            self.tokens.next()
+            out = self.parse_expression()
+            self.expect(TokenType.RPAREN)
+            return out
         else:
             raise BadGrammarError(f"Unexpected token: {token}", token.line)
 
@@ -822,7 +895,7 @@ def parse(
     error_out: List[str],
     grammar_toplevel_name: str = "Toplevel",
     barg_exec_transforms=None,
-) -> List[Generator | Exception]:
+) -> List[Generator]:
     if barg_exec_transforms is None:
         barg_exec_transforms = barg.BARG_EXEC_BUILTINS
     lexer = Lexer(grammar)
@@ -832,15 +905,7 @@ def parse(
     ast = parser.parse()
     error_out.extend(parser.errors)
     module = ModuleInfo(ast, barg_exec_transforms)
-    out = []
-    for string in strings:
-        try:
-            out.append(ast.match(string, module, grammar_toplevel_name))
-        except Exception as e:
-            error_out.append(
-                f"On line {e.__barg_line if hasattr(e, '__barg_line') and e.__barg_line != -1 else '<unknown/eof>'}: {e}\nPython {traceback.format_exc()}"
-            )
-            out.append(Exception("parsing failed"))
+    out = [ast.match(string, module, grammar_toplevel_name) for string in strings]
     return out
 
 
