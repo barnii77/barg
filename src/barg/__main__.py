@@ -1,7 +1,47 @@
 import os
+import sys
 import traceback
 import argparse
 import barg
+
+
+def map_call_stack_to_local_selfs():
+    """Captures the call stack and extracts self from all frames (locals) where it can"""
+    _, _, exc_tb = sys.exc_info()
+    mapped_objects = []
+
+    # Traverse the traceback's frames
+    for frame, lineno in traceback.walk_tb(exc_tb):
+        code_obj = frame.f_code
+        func_name = code_obj.co_name
+
+        local_vars = frame.f_locals
+        instance = None
+
+        if "self" in local_vars:
+            instance = local_vars["self"]
+
+        if instance:
+            mapped_objects.append((func_name, instance, lineno))
+        else:
+            mapped_objects.append((func_name, None, lineno))
+
+    return mapped_objects
+
+
+def mark_line_in_grammar(grammar: str, lineno: int) -> str:
+    """a function that takes grammar[line-4:line+5], indents it all and puts an arrow before grammar[line]"""
+    lineno -= 1  # lines start at 1, indices at 0
+    max_lineno_len = max(map(lambda i: len(str(i)), range(lineno - 4, lineno + 5)))
+    lines = grammar.splitlines()[max(0, lineno - 4) : lineno + 5]
+    for i, line in enumerate(lines[: min(4, lineno)]):
+        lines[i] = str(i - 4 + lineno).ljust(max_lineno_len) + "|" + " " * 4 + line
+    for i, line in enumerate(lines[min(4, lineno) + 1 :]):
+        lines[i + min(4, lineno) + 1] = (
+            str(i + 1 + lineno).ljust(max_lineno_len) + "|" + " " * 4 + line
+        )
+    lines[min(4, lineno)] = "----> " + lines[min(4, lineno)]
+    return "\n".join(lines)
 
 
 def barg_test(args):
@@ -11,7 +51,8 @@ def barg_test(args):
 
 
 def barg_exec(args):
-    barg.DEBUG = True
+    if args.max_recursion_limit:
+        sys.setrecursionlimit(args.max_recursion_limit)
     if not os.path.exists(args.text_file) or not os.path.isfile(args.text_file):
         print("Could not find file " + args.text_file)
         return
@@ -31,6 +72,26 @@ def barg_exec(args):
         try:
             m = next(g)[0]
             print(m)
+        except RecursionError:
+            err = "Python recursion limit exceeded. This may indicate a flawed grammar which contains infinite cycles. The Python call stack and associated barg patterns are listed below:\n"
+            if args.backtrace_len_limit:
+                err += f"[truncated because backtrace length limit set to {args.backtrace_len_limit}]\n[...........................]\n"
+            funcs_and_selfs = map_call_stack_to_local_selfs()
+            funcs_and_selfs = (
+                funcs_and_selfs[-args.backtrace_len_limit :]
+                if args.backtrace_len_limit
+                else funcs_and_selfs
+            )
+            for func, s, lineno in funcs_and_selfs:
+                if s is None or not hasattr(s, "line"):
+                    err += f"Python function '{func}' on line {lineno} called - cannot be mapped to barg grammar...\n"
+                else:
+                    err += (
+                        f"Python function '{func}' on line {lineno} called - belongs to barg grammar:\n"
+                        + mark_line_in_grammar(grammar, s.line)
+                        + "\n"
+                    )
+            raise RecursionError(err)
         except Exception as e:
             errs.append(
                 f"On line {e.__barg_line if hasattr(e, '__barg_line') and e.__barg_line != -1 else '<unknown/eof>'}: {e}\nPython {traceback.format_exc()}"
@@ -59,6 +120,8 @@ if __name__ == "__main__":
     bex.add_argument("text_file")
     bex.add_argument("--grammar", "-g", required=True)
     bex.add_argument("--toplevel-name", "-tn", default="Toplevel")
+    bex.add_argument("--max-recursion-limit", "-rec", type=int, default=None)
+    bex.add_argument("--backtrace-len-limit", "-btlen", type=int, default=None)
 
     bcg.add_argument("grammar")
     bcg.add_argument("--toplevel-name", "-tn", default="Toplevel")
