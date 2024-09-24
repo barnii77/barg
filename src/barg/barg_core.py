@@ -847,7 +847,7 @@ def parse(
     return out
 
 
-def generate_python_parser(
+def generate_crappy_python_parser(
     barg_source_path: str, grammar: str, grammar_toplevel_name: str
 ) -> str:
     code = f'GRAMMAR = """{grammar}"""\nGRAMMAR_TOPLEVEL_NAME = "{grammar_toplevel_name}"\n\n'
@@ -882,3 +882,14 @@ def parse(
     return out
 """
     return code
+
+
+def generate_python_parser(grammar: str, error_out: List[str]):
+    lexer = Lexer(grammar)
+    tokens = lexer.tokenize()
+    error_out.extend(lexer.errors)
+    parser = Parser(tokens)
+    ast = parser.parse()
+    error_out.extend(parser.errors)
+    module = ModuleInfo(ast, {})
+

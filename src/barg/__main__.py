@@ -105,7 +105,7 @@ def barg_codegen(args):
         return
     with open(args.grammar) as f:
         grammar = f.read()
-    code = barg.generate_python_parser(src_path, grammar, args.toplevel_name)
+    code = barg.generate_crappy_python_parser(src_path, grammar, args.toplevel_name)
     with open(args.outfile, "w") as f:
         f.write(code)
 

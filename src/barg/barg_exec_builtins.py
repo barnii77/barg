@@ -118,37 +118,6 @@ def builtin_pyscript(module, m, pyscript: "barg.AstTextString | str | Any", *arg
     return globs["x"]
 
 
-# currently not possible because there is no fixed ordering to the fields of a struct, so you cannot reconstruct the original string that was matched.
-# since this is only a convenience function anyway (to avoid repetition), it's not a big problem at the moment.
-# def builtin_join(module, m):
-#     if hasattr(m, "type_"):
-#         if m.type_ == barg.GenTyKind.STRUCT:
-#             return "".join(
-#                 builtin_join(module, getattr(m, field))
-#                 for field in dir(m)
-#                 if not (
-#                     field[0] == "_"
-#                     and field[1:].isdigit()
-#                     or field[-1] == "_"
-#                 )
-#             )
-#         elif m.type_ == barg.GenTyKind.ENUM:
-#             return builtin_join(module, m.value)
-#         else:
-#             raise barg.InternalError(
-#                 "invalid value of 'type_' encountered in join builtin"
-#             )
-#     elif isinstance(m, list):
-#         return "".join(builtin_join(module, item) for item in m)
-#     else:
-#         try:
-#             return str(m)
-#         except ValueError:
-#             raise barg.BadGrammarError(
-#                 f"Cannot join submatch of type '{type(m)}' with value '{m}'"
-#             )
-
-
 def insert_transform(transforms: Dict[str, Any], full_name: str, function: Callable):
     ns = transforms
     path = full_name.split(".")
@@ -180,7 +149,6 @@ def insert_all_builtins(transforms):
     insert_transform(transforms, "builtin.filter", builtin_filter)
     insert_transform(transforms, "builtin.pyexpr", builtin_pyexpr)
     insert_transform(transforms, "builtin.pyscript", builtin_pyscript)
-    # insert_transform(transforms, "builtin.join", builtin_join)
 
 
 TAKE_BUILTIN_NAME = "builtin.take"
