@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="barnii77-barg",
-    version="0.1.6",
+    version="0.2.0",
     description="Barni's tiny parser generator for parsing strings/code",
     packages=find_packages(where="src"),
     package_dir={"": "src"},
