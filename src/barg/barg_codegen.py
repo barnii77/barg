@@ -122,6 +122,15 @@ import regex
 _TRANSFORMS_ = {}
 
 
+def _wrap_in_parsable_type_(func):
+    class Ty:
+        @staticmethod
+        def parse(text: str):
+            return next(func(text))
+
+    return Ty
+
+
 class _TextString_:
     def __init__(self, value: str):
         self.value = value
@@ -146,8 +155,9 @@ def _match{u}_(text: str):
         yield m.group(0), m.end(0)
 """
         self.match_functions[ast] = PyCGInternalGenSymbol(f"_match{u}_", code)
+        content = ast.value.replace('"', '\\"')
         self.glob_assigns[ast] = PyCGInternalGenSymbol(
-            f"_pat{u}_", f"_pat{u}_ = {ast.value}"
+            f"_pat{u}_", f'_pat{u}_ = regex.compile(r"""{content}""")'
         )
 
     def gen_list(self, ast: "barg.AstList"):
@@ -207,17 +217,22 @@ def _match{u}_(text: str, matched_exprs=None):
         if ast in self.glob_assigns:
             return
 
-        if not isinstance(
-            ast.expression, (barg.AstStruct, barg.AstEnum, barg.AstTextString)
-        ):
-            raise barg.InternalError(
-                "it is not supported during codegen to generate exposed types for ast nodes that are not structs or enums (because they don't naturally map to custom types and therefore do not support the required interfaces, eg. Ty.parse)"
-            )
-
         self.gen_ast(ast.expression)
-        self.glob_assigns[ast] = PyCGInternalGenSymbol(
-            ast.identifier, f"{ast.identifier} = {self.class_defs[ast.expression].name}"
-        )
+        if isinstance(ast.expression, (barg.AstStruct, barg.AstEnum)):
+            self.glob_assigns[ast] = PyCGInternalGenSymbol(
+                ast.identifier,
+                f"{ast.identifier} = {self.class_defs[ast.expression].name}",
+            )
+        elif isinstance(ast.expression, barg.AstTextString):
+            self.glob_assigns[ast] = PyCGInternalGenSymbol(
+                ast.identifier,
+                f"{ast.identifier} = {self.glob_assigns[ast.expression].name}",
+            )
+        else:
+            self.glob_assigns[ast] = PyCGInternalGenSymbol(
+                ast.identifier,
+                f"{ast.identifier} = _wrap_in_parsable_type_({self.match_functions[ast.expression].name})",
+            )
 
     def gen_text_string(self, ast: "barg.AstTextString"):
         if ast in self.glob_assigns:
@@ -279,6 +294,10 @@ class _Ty{u}_:
         self.type_ = 1
         self.tag = tag
         self.value = value
+
+    @staticmethod
+    def parse(text: str):
+        return next(_match{u}_(text))
 """,
         )
 
@@ -321,7 +340,7 @@ class _Ty{u}_:
 
     @staticmethod
     def parse(text: str):
-        return _match{u}_(text)[0]
+        return next(_match{u}_(text))
 """,
         )
 

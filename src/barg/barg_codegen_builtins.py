@@ -6,6 +6,15 @@ from typing import Optional, Any, Dict, Callable
 _TRANSFORMS_ = {}
 
 
+def _wrap_in_parsable_type_(func):
+    class Ty:
+        @staticmethod
+        def parse(text: str):
+            return next(func(text))
+
+    return Ty
+
+
 class _TextString_:
     def __init__(self, value: str):
         self.value = value

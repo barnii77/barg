@@ -668,16 +668,16 @@ class Parser:
             raise BadGrammarError("expected expression", -1)
         if token.type_ == TokenType.STRING:
             self.tokens.next()
-            return AstString(token.line, token.value[1:-1])
+            return AstString(token.line, token.value[1:-1].replace('\\"', '"'))
         elif token.type_ == TokenType.MULTILINE_STRING:
             self.tokens.next()
-            return AstString(token.line, token.value[3:-3])
+            return AstString(token.line, token.value[3:-3].replace('\\"', '"'))
         elif token.type_ == TokenType.TEXT_STRING:
             self.tokens.next()
-            return AstTextString(token.line, token.value[1:-1])
+            return AstTextString(token.line, token.value[1:-1].replace('\\"', '"'))
         elif token.type_ == TokenType.MULTILINE_TEXT_STRING:
             self.tokens.next()
-            return AstTextString(token.line, token.value[3:-3])
+            return AstTextString(token.line, token.value[3:-3].replace('\\"', '"'))
         elif token.type_ == TokenType.IDENTIFIER:
             self.tokens.next()
             return AstVariable(token.line, token.value)
