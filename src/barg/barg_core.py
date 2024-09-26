@@ -847,7 +847,7 @@ def parse(
     return out
 
 
-def generate_crappy_python_parser(
+def generate_python_parser_deprecated(
     barg_source_path: str, grammar: str, grammar_toplevel_name: str
 ) -> str:
     code = f'GRAMMAR = """{grammar}"""\nGRAMMAR_TOPLEVEL_NAME = "{grammar_toplevel_name}"\n\n'
@@ -884,7 +884,16 @@ def parse(
     return code
 
 
-def generate_python_parser(grammar: str, error_out: List[str]):
+def generate_python_parser(
+    grammar: str, error_out: List[str], head: Optional[str] = None
+):
+    """
+    Generate python code from the given grammar and return it in a string.
+    Args:
+        grammar: the barg grammar
+        error_out: a list where recoverable grammar errors will be written out to as strings.
+        head: optional string to be inserted at the top of the generated parser. should contain builtins and imports. if None, then a very minimalistic default will be used.
+    """
     lexer = Lexer(grammar)
     tokens = lexer.tokenize()
     error_out.extend(lexer.errors)
@@ -892,4 +901,5 @@ def generate_python_parser(grammar: str, error_out: List[str]):
     ast = parser.parse()
     error_out.extend(parser.errors)
     module = ModuleInfo(ast, {})
-
+    pycg = barg.PythonCodeGenerator(ast, module)
+    return pycg.codegen(head)

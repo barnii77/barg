@@ -105,7 +105,25 @@ def barg_codegen(args):
         return
     with open(args.grammar) as f:
         grammar = f.read()
-    code = barg.generate_crappy_python_parser(src_path, grammar, args.toplevel_name)
+    with open(f"{src_path}/barg/barg_codegen_builtins.py") as f:
+        head = f.read()
+    error_out = []
+    code = barg.generate_python_parser(grammar, error_out, head)
+    if error_out:
+        print("Errors encountered:\n" + "\n---------------\n".join(error_out))
+    else:
+        with open(args.outfile, "w") as f:
+            f.write(code)
+
+
+def barg_codegen_deprecated(args):
+    src_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    if not os.path.exists(args.grammar) or not os.path.isfile(args.grammar):
+        print("Could not find file " + args.text_file)
+        return
+    with open(args.grammar) as f:
+        grammar = f.read()
+    code = barg.generate_python_parser_deprecated(src_path, grammar, args.toplevel_name)
     with open(args.outfile, "w") as f:
         f.write(code)
 
@@ -115,6 +133,7 @@ if __name__ == "__main__":
     sp = ap.add_subparsers()
     bex = sp.add_parser("exec")
     bcg = sp.add_parser("codegen")
+    bcgd = sp.add_parser("codegen-deprecated")
     btest = sp.add_parser("test")
 
     bex.add_argument("text_file")
@@ -124,11 +143,15 @@ if __name__ == "__main__":
     bex.add_argument("--backtrace-len-limit", "-btlen", type=int, default=None)
 
     bcg.add_argument("grammar")
-    bcg.add_argument("--toplevel-name", "-tn", default="Toplevel")
     bcg.add_argument("--outfile", "-o", default="barg_generated_parser.py")
+
+    bcgd.add_argument("grammar")
+    bcgd.add_argument("--toplevel-name", "-tn", default="Toplevel")
+    bcgd.add_argument("--outfile", "-o", default="barg_generated_parser.py")
 
     bex.set_defaults(func=barg_exec)
     bcg.set_defaults(func=barg_codegen)
+    bcgd.set_defaults(func=barg_codegen_deprecated)
     btest.set_defaults(func=barg_test)
     args = ap.parse_args()
     if not hasattr(args, "func"):

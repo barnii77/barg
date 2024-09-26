@@ -1,5 +1,6 @@
+import os
 import barg
-from typing import Dict, List
+from typing import Dict, Optional
 
 
 def indent(text: str) -> str:
@@ -11,10 +12,10 @@ class CodeGenerator:
     Abstract codegen backend for different codegen targets
     """
 
-    def __init__(self, mod: "barg.ModuleInfo"):
+    def __init__(self, ast: "barg.AstToplevel", mod: "barg.ModuleInfo"):
         self.mod = mod
 
-    def codegen(self) -> str:
+    def codegen(self, *args, **kwargs) -> str:
         raise NotImplementedError
 
     def gen_ast(self, ast: "barg.AstNode"):
@@ -95,29 +96,44 @@ class PythonCodeGenerator(CodeGenerator):
     ```
     """
 
-    def __init__(self, mod: "barg.ModuleInfo"):
-        super().__init__(mod)
+    def __init__(self, ast: "barg.AstToplevel", mod: "barg.ModuleInfo"):
+        super().__init__(ast, mod)
         self.match_functions: Dict["barg.AstNode", PyCGInternalGenSymbol] = {}
         self.class_defs: Dict["barg.AstNode", PyCGInternalGenSymbol] = {}
         self.glob_assigns: Dict["barg.AstNode", PyCGInternalGenSymbol] = {}
         self.uid = 0
+        self.gen_ast(ast)
 
     def next_uid(self) -> int:
         u = self.uid
         self.uid += 1
         return u
 
-    def codegen(self, head: str) -> str:
+    def codegen(self, head: Optional[str] = None) -> str:
         """
-        After gen_ast has been executed for the toplevel ast node, the codegen method generates the python parser.
+        The codegen method generates the python parser.
         Args:
             head: code to be inserted after the imports that contains transform definitions etc
         """
-        imports = "import regex\n\n\n"
+        head = (
+            """\
+import regex
+
+_TRANSFORMS_ = {}
+
+
+class _TextString_:
+    def __init__(self, value: str):
+        self.value = value
+"""
+            if head is None
+            else head
+        )
+
         funcs = "\n\n".join(map(lambda i: i.code, self.match_functions.values()))
         classes = "\n\n".join(map(lambda i: i.code, self.class_defs.values()))
         glob_assigns = "\n".join(map(lambda i: i.code, self.glob_assigns.values()))
-        return "\n\n".join((imports, head, funcs, classes, glob_assigns))
+        return "\n\n".join((head, funcs, classes, glob_assigns))
 
     def gen_string(self, ast: "barg.AstString"):
         if ast in self.match_functions:
@@ -191,7 +207,9 @@ def _match{u}_(text: str, matched_exprs=None):
         if ast in self.glob_assigns:
             return
 
-        if not isinstance(ast.expression, (barg.AstStruct, barg.AstEnum)):
+        if not isinstance(
+            ast.expression, (barg.AstStruct, barg.AstEnum, barg.AstTextString)
+        ):
             raise barg.InternalError(
                 "it is not supported during codegen to generate exposed types for ast nodes that are not structs or enums (because they don't naturally map to custom types and therefore do not support the required interfaces, eg. Ty.parse)"
             )
@@ -202,12 +220,48 @@ def _match{u}_(text: str, matched_exprs=None):
         )
 
     def gen_text_string(self, ast: "barg.AstTextString"):
-        # TODO
-        raise NotImplementedError
+        if ast in self.glob_assigns:
+            return
+
+        u = self.next_uid()
+        content = ast.value.replace('"', '\\"')
+        self.glob_assigns[ast] = PyCGInternalGenSymbol(
+            f"_text{u}_", f'_text{u}_ = _TextString_(r"""{content}""")'
+        )
 
     def gen_transform(self, ast: "barg.AstTransform"):
-        # TODO
-        raise NotImplementedError
+        if ast in self.match_functions:
+            return
+
+        u = self.next_uid()
+
+        if ast.pattern_arg not in self.match_functions:
+            self.gen_ast(ast.pattern_arg)
+
+        matcher = self.match_functions[ast.pattern_arg]
+        args_str = []
+        for arg in ast.args:
+            if isinstance(arg, int):
+                args_str.append(str(arg))
+            elif isinstance(arg, str):
+                args_str.append(f'r"""{arg}"""')
+            elif isinstance(arg, barg.AstTextString):
+                content = arg.value.replace('"', '\\"')
+                args_str.append(f'_TextString_(r"""{content}""")')
+            else:
+                raise barg.InternalError(
+                    "invalid type of transform arg encountered (should have failed earlier with BadGrammarError but didn't)"
+                )
+
+        self.match_functions[ast] = PyCGInternalGenSymbol(
+            f"_match{u}_",
+            f"""\
+def _match{u}_(text: str):
+    transform = _TRANSFORMS_["{ast.name}"]
+    for m, ncons in {matcher.name}(text):
+        yield transform(m, {', '.join(args_str)}), ncons
+""",
+        )
 
     def gen_enum(self, ast: "barg.AstEnum"):
         if ast in self.class_defs or ast in self.match_functions:
