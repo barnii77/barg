@@ -1,6 +1,5 @@
-import os
 import barg
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 
 def indent(text: str) -> str:
@@ -14,6 +13,12 @@ class CodeGenerator:
 
     def __init__(self, ast: "barg.AstToplevel", mod: "barg.ModuleInfo"):
         self.mod = mod
+        self.uid = 0
+
+    def next_uid(self) -> int:
+        u = self.uid
+        self.uid += 1
+        return u
 
     def codegen(self, *args, **kwargs) -> str:
         raise NotImplementedError
@@ -78,6 +83,17 @@ class PyCGInternalGenSymbol:
         self.code = code
 
 
+def unique_codes(defns) -> List[str]:
+    used = set()
+    out = []
+    for defn in defns:
+        if id(defn) in used:
+            continue
+        used.add(id(defn))
+        out.append(defn.code)
+    return out
+
+
 class PythonCodeGenerator(CodeGenerator):
     """
     Python codegen target. Generated code structure:
@@ -101,13 +117,7 @@ class PythonCodeGenerator(CodeGenerator):
         self.match_functions: Dict["barg.AstNode", PyCGInternalGenSymbol] = {}
         self.class_defs: Dict["barg.AstNode", PyCGInternalGenSymbol] = {}
         self.glob_assigns: Dict["barg.AstNode", PyCGInternalGenSymbol] = {}
-        self.uid = 0
         self.gen_ast(ast)
-
-    def next_uid(self) -> int:
-        u = self.uid
-        self.uid += 1
-        return u
 
     def codegen(self, head: Optional[str] = None) -> str:
         """
@@ -139,9 +149,9 @@ class _TextString_:
             else head
         )
 
-        funcs = "\n\n".join(map(lambda i: i.code, self.match_functions.values()))
-        classes = "\n\n".join(map(lambda i: i.code, self.class_defs.values()))
-        glob_assigns = "\n".join(map(lambda i: i.code, self.glob_assigns.values()))
+        funcs = "\n\n".join(unique_codes(self.match_functions.values()))
+        classes = "\n\n".join(unique_codes(self.class_defs.values()))
+        glob_assigns = "\n".join(unique_codes(self.glob_assigns.values()))
         return "\n\n".join((head, funcs, classes, glob_assigns))
 
     def gen_string(self, ast: "barg.AstString"):
@@ -149,6 +159,7 @@ class _TextString_:
             return
 
         u = self.next_uid()
+
         code = f"""\
 def _match{u}_(text: str):
     for m in _pat{u}_.finditer(text, overlapped=True):
@@ -165,8 +176,15 @@ def _match{u}_(text: str):
             return
 
         u = self.next_uid()
+
+        self.match_functions[ast] = PyCGInternalGenSymbol(
+            f"_match{u}_",
+            None,
+        )
+
         if ast.expression not in self.match_functions:
             self.gen_ast(ast.expression)
+
         ast_matcher = self.match_functions[ast.expression]
         if ast.mode == "greedy":
             code = f"""\
@@ -180,9 +198,9 @@ def _match{u}_(text: str, matched_exprs=None):
     if {ast.range_start} <= len(matched_exprs):
         yield matched_exprs, 0
 
-    for local_m, local_ncons in {ast_matcher.name}(string, module):
+    for local_m, local_ncons in {ast_matcher.name}(text):
         for m, ncons in _match{u}_(
-            string[local_ncons:], module, matched_exprs + [local_m]
+            text[local_ncons:], matched_exprs + [local_m]
         ):
             yield m, local_ncons + ncons
 """
@@ -195,9 +213,9 @@ def _match{u}_(text: str, matched_exprs=None):
     if {ast.range_end} is not None and len(matched_exprs) >= {ast.range_end}:
         return
 
-    for local_m, local_ncons in {ast_matcher.name}(string, module):
+    for local_m, local_ncons in {ast_matcher.name}(text):
         for m, ncons in _match{u}_(
-            string[local_ncons:], module, matched_exprs + [local_m]
+            text[local_ncons:], matched_exprs + [local_m]
         ):
             yield m, local_ncons + ncons
 
@@ -205,19 +223,24 @@ def _match{u}_(text: str, matched_exprs=None):
         yield matched_exprs, 0
 
 """
-        self.match_functions[ast] = PyCGInternalGenSymbol(f"_match{u}_", code)
+        self.match_functions[ast].code = code
 
     def gen_variable(self, ast: "barg.AstVariable"):
+        if ast in self.match_functions:
+            return
+
         if ast.name not in self.mod.definitions:
             raise barg.BadGrammarError(f"use of undefined name '{ast.name}'")
 
         self.gen_ast(self.mod.definitions[ast.name])
+        self.match_functions[ast] = self.match_functions[self.mod.definitions[ast.name]]
 
     def gen_assignment(self, ast: "barg.AstAssignment"):
         if ast in self.glob_assigns:
             return
 
         self.gen_ast(ast.expression)
+
         if isinstance(ast.expression, (barg.AstStruct, barg.AstEnum)):
             self.glob_assigns[ast] = PyCGInternalGenSymbol(
                 ast.identifier,
@@ -250,6 +273,11 @@ def _match{u}_(text: str, matched_exprs=None):
 
         u = self.next_uid()
 
+        self.match_functions[ast] = PyCGInternalGenSymbol(
+            f"_match{u}_",
+            None,
+        )
+
         if ast.pattern_arg not in self.match_functions:
             self.gen_ast(ast.pattern_arg)
 
@@ -268,15 +296,14 @@ def _match{u}_(text: str, matched_exprs=None):
                     "invalid type of transform arg encountered (should have failed earlier with BadGrammarError but didn't)"
                 )
 
-        self.match_functions[ast] = PyCGInternalGenSymbol(
-            f"_match{u}_",
-            f"""\
+        self.match_functions[
+            ast
+        ].code = f"""\
 def _match{u}_(text: str):
     transform = _TRANSFORMS_["{ast.name}"]
     for m, ncons in {matcher.name}(text):
         yield transform(m, {', '.join(args_str)}), ncons
-""",
-        )
+"""
 
     def gen_enum(self, ast: "barg.AstEnum"):
         if ast in self.class_defs or ast in self.match_functions:
@@ -285,12 +312,17 @@ def _match{u}_(text: str):
 
         u = self.next_uid()
 
+        self.match_functions[ast] = PyCGInternalGenSymbol(
+            f"_match{u}_",
+            None,
+        )
+
         # generate type
         self.class_defs[ast] = PyCGInternalGenSymbol(
             f"_Ty{u}_",
             f"""\
 class _Ty{u}_:
-    def __init__(self, tag: int, value):
+    def __init__(self, tag: str, value):
         self.type_ = 1
         self.tag = tag
         self.value = value
@@ -304,18 +336,19 @@ class _Ty{u}_:
         # generate matching function
         loops = []
         for tag, expr in ast.variants:
+            if expr not in self.match_functions:
+                self.gen_ast(expr)
             body = indent(f"yield _Ty{u}_('{tag}', m), ncons")
             loops.append(
                 f"for m, ncons in {self.match_functions[expr].name}(text):\n{body}"
             )
         loops = "\n".join(loops)
-        self.match_functions[ast] = PyCGInternalGenSymbol(
-            f"_match{u}_",
-            f"""\
+        self.match_functions[
+            ast
+        ].code = f"""\
 def _match{u}_(text: str):
 {indent(loops)}
-""",
-        )
+"""
 
     def gen_struct(self, ast: "barg.AstStruct"):
         if ast in self.class_defs or ast in self.match_functions:
@@ -323,6 +356,11 @@ def _match{u}_(text: str):
             return
 
         u = self.next_uid()
+
+        self.match_functions[ast] = PyCGInternalGenSymbol(
+            f"_match{u}_",
+            None,
+        )
 
         # generate the type definition
         field_names = list(map(lambda p: p[0], ast.fields))
@@ -346,20 +384,18 @@ class _Ty{u}_:
 
         # generate the matching function
         nested_fors = f"yield _Ty{u}_({', '.join('local_m' + str(i) for i in range(len(ast.fields)))}), {' + '.join('local_ncons' + str(i) for i in range(len(ast.fields)))}"
-        for i, f in reversed(list(enumerate(ast.fields))):
-            expr = f[1]
-            self.gen_ast(expr)
+        for i, (_, expr) in reversed(list(enumerate(ast.fields))):
+            if expr not in self.match_functions:
+                self.gen_ast(expr)
             nested_fors = f"for local_m{i}, local_ncons{i} in {self.match_functions[expr].name}(text):\n{indent(nested_fors)}"
 
-        self.match_functions[ast] = PyCGInternalGenSymbol(
-            f"_match{u}_",
-            f"""\
+        self.match_functions[
+            ast
+        ].code = f"""\
 def _match{u}_(text: str):
 {indent(nested_fors)}
-""",
-        )
+"""
 
     def gen_toplevel(self, ast: "barg.AstToplevel"):
         for defn in ast.assignments:
-            if isinstance(defn.expression, (barg.AstStruct, barg.AstEnum)):
-                self.gen_assignment(defn)
+            self.gen_assignment(defn)

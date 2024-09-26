@@ -184,6 +184,9 @@ class ModuleInfo:
 class AstNode:
     line: int = -1
 
+    def __str__(self) -> str:
+        return "AstNode()"
+
     def __repr__(self):
         return str(self)
 
@@ -530,6 +533,15 @@ class AstTextString(AstNode):
     def __init__(self, line: int, value: str):
         self.line = line
         self.value = value
+
+    def __str__(self) -> str:
+        return f"AstToplevel(value=```{self.value}```)"
+
+    def __hash__(self):
+        return hash((self.value,))
+
+    def __eq__(self, other: object, /) -> bool:
+        return isinstance(other, AstToplevel) and self.value == other.value
 
 
 class Parser:
