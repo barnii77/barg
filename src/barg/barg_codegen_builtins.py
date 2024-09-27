@@ -1,7 +1,7 @@
 # NOTE: this code will be C-header-style inserted into the generated parsers. "Unused" imports aren't actually unused.
-import regex
-from enum import Enum
-from typing import Optional, Any, Dict, Callable
+import regex as _regex_
+from enum import Enum as _Enum_
+from typing import Optional as _Optional_, Any as _Any_, Dict as _Dict_, Callable as _Callable_
 
 _TRANSFORMS_ = {}
 
@@ -20,45 +20,45 @@ class _TextString_:
         self.value = value
 
 
-class BadGrammarError(Exception):
-    def __init__(self, msg: str, line: Optional[int] = None):
+class _BadGrammarError_(Exception):
+    def __init__(self, msg: str, line: _Optional_[int] = None):
         super().__init__(line, msg)
 
 
 # It is strongly recommended to pass `None` as the value for parameter `line`.
-class InternalError(Exception):
-    def __init__(self, msg: str, line: Optional[int] = None):
+class _InternalError_(Exception):
+    def __init__(self, msg: str, line: _Optional_[int] = None):
         super().__init__(line, msg)
 
 
-class GenTyKind(Enum):
+class _GenTyKind_(_Enum_):
     STRUCT = 0
     ENUM = 1
 
 
 # NOTE: '|Any ' in field so it can be called in non-type-safe way from other places
-def _builtin_take_(m, field: Optional[str] | Any = None):
+def _builtin_take_(m, field: _Optional_[str] | _Any_ = None):
     if field is not None and not isinstance(field, str):
-        raise BadGrammarError(
+        raise _BadGrammarError_(
             f"the field parameter of the take builtin must be an identifier or unprovided, not {type(field)}",
         )
     if not hasattr(m, "type_"):
-        raise InternalError("can only apply barg_take builtin to struct or enum type")
-    if m.type_ == GenTyKind.STRUCT:
+        raise _InternalError_("can only apply barg_take builtin to struct or enum type")
+    if m.type_ == _GenTyKind_.STRUCT:
         if not field:
-            raise BadGrammarError(
+            raise _BadGrammarError_(
                 "if take is applied to a struct, it takes a field parameter in the form $take(expr, fieldname123) where fieldname123 (without quotes) is the fieldname",
             )
         return getattr(m, field)
-    elif m.type_ == GenTyKind.ENUM:
+    elif m.type_ == _GenTyKind_.ENUM:
         return getattr(m, "value")
     else:
-        raise InternalError("invalid value of 'type_' encountered in take")
+        raise _InternalError_("invalid value of 'type_' encountered in take")
 
 
 def _builtin_int_(m):
     if not isinstance(m, str):
-        raise BadGrammarError(
+        raise _BadGrammarError_(
             f"the match parameter of the int builtin must be a string match, not type {type(m)}",
         )
     return int(m)
@@ -66,32 +66,32 @@ def _builtin_int_(m):
 
 def _builtin_float_(m):
     if not isinstance(m, str):
-        raise BadGrammarError(
+        raise _BadGrammarError_(
             f"the match parameter of the int builtin must be a string match, not type {type(m)}",
         )
     return float(m)
 
 
-def _builtin_delete_(m, field: Optional[str] | Any = None):
+def _builtin_delete_(m, field: _Optional_[str] | _Any_ = None):
     if field is not None and not isinstance(field, str):
-        raise BadGrammarError(
+        raise _BadGrammarError_(
             f"the field parameter of the delete builtin must be an identifier or unprovided, not {type(field)}",
         )
     if not hasattr(m, "type_"):
-        raise BadGrammarError("can only apply barg_take builtin to struct or enum type")
-    if m.type_ == GenTyKind.STRUCT and field:
+        raise _BadGrammarError_("can only apply barg_take builtin to struct or enum type")
+    if m.type_ == _GenTyKind_.STRUCT and field:
         setattr(m, field, None)
-    elif m.type_ == GenTyKind.ENUM:
+    elif m.type_ == _GenTyKind_.ENUM:
         if field and m.tag == field or not field:
             m.value = None
     else:
-        raise InternalError("invalid value of 'type_' encountered in delete")
+        raise _InternalError_("invalid value of 'type_' encountered in delete")
     return m
 
 
 def _builtin_mark_(m, mark: str):
     if not mark or not isinstance(mark, str):
-        raise BadGrammarError(
+        raise _BadGrammarError_(
             f"mark '{mark}' is invalid, mark must be a non-empty string"
         )
     setattr(m, f"mark_{mark}_", None)
@@ -100,27 +100,27 @@ def _builtin_mark_(m, mark: str):
 
 def _builtin_filter_(m, mark: str):
     if not mark or not isinstance(mark, str):
-        raise BadGrammarError(
+        raise _BadGrammarError_(
             f"mark '{mark}' is invalid, mark must be a non-empty string"
         )
     if not isinstance(m, list):
-        raise BadGrammarError(f"filter builtin applied to non-list object {m}")
+        raise _BadGrammarError_(f"filter builtin applied to non-list object {m}")
     return list(filter(lambda item: hasattr(item, f"mark_{mark}_"), m))
 
 
 def _builtin_pyexpr_(m, pyexpr: "_TextString_ | str | Any", *args):
     if not pyexpr or not isinstance(pyexpr, (_TextString_, str)):
-        raise BadGrammarError(
+        raise _BadGrammarError_(
             f"pyexpr '{pyexpr}' is invalid, pyexpr must be a non-empty text string or variable"
         )
     if isinstance(pyexpr, _TextString_):
         code = pyexpr.value
     else:
         if pyexpr not in globals():
-            raise BadGrammarError(f"variable '{pyexpr}' is not defined")
+            raise _BadGrammarError_(f"variable '{pyexpr}' is not defined")
         defn = globals()[pyexpr]
         if not isinstance(defn, _TextString_):
-            raise BadGrammarError(
+            raise _BadGrammarError_(
                 f"variable '{pyexpr}' does not refer to a text string (but has to)"
             )
         code = defn.value
@@ -129,17 +129,17 @@ def _builtin_pyexpr_(m, pyexpr: "_TextString_ | str | Any", *args):
 
 def _builtin_pyscript_(m, pyscript: "_TextString_ | str | Any", *args):
     if not pyscript or not isinstance(pyscript, (_TextString_, str)):
-        raise BadGrammarError(
+        raise _BadGrammarError_(
             f"pyscript '{pyscript}' is invalid, pyscript must be a non-empty text string or variable"
         )
     if isinstance(pyscript, _TextString_):
         code = pyscript.value
     else:
         if pyscript not in globals():
-            raise BadGrammarError(f"variable '{pyscript}' is not defined")
+            raise _BadGrammarError_(f"variable '{pyscript}' is not defined")
         defn = globals()[pyscript]
         if not isinstance(defn, _TextString_):
-            raise BadGrammarError(
+            raise _BadGrammarError_(
                 f"variable '{pyscript}' does not refer to a text string (but has to)"
             )
         code = defn.value
@@ -148,7 +148,7 @@ def _builtin_pyscript_(m, pyscript: "_TextString_ | str | Any", *args):
     return globs["x"]
 
 
-def _insert_transform_(transforms: Dict[str, Any], full_name: str, function: Callable):
+def _insert_transform_(transforms: _Dict_[str, _Any_], full_name: str, function: _Callable_):
     ns = transforms
     path = full_name.split(".")
     for name in path[:-1]:
@@ -156,15 +156,15 @@ def _insert_transform_(transforms: Dict[str, Any], full_name: str, function: Cal
     ns[path[-1]] = function
 
 
-def _get_transform_(transforms: Dict[str, Any], full_name: str) -> Callable:
+def _get_transform_(transforms: _Dict_[str, _Any_], full_name: str) -> _Callable_:
     path = full_name.split(".")
     transform = transforms
     for name in path:
         if name not in transform:
-            raise BadGrammarError(f"usage of unknown transform '{full_name}'")
+            raise _BadGrammarError_(f"usage of unknown transform '{full_name}'")
         transform = transform[name]
     if not callable(transform):
-        raise InternalError(f"transform {full_name} is a namespace, not a function")
+        raise _InternalError_(f"transform {full_name} is a namespace, not a function")
     return transform
 
 

@@ -161,6 +161,7 @@ class _TextString_:
         u = self.next_uid()
 
         code = f"""\
+# generated from barg grammar line {ast.line}
 def _match{u}_(text: str):
     for m in _pat{u}_.finditer(text, overlapped=True):
         yield m.group(0), m.end(0)
@@ -168,7 +169,7 @@ def _match{u}_(text: str):
         self.match_functions[ast] = PyCGInternalGenSymbol(f"_match{u}_", code)
         content = ast.value.replace('"', '\\"')
         self.glob_assigns[ast] = PyCGInternalGenSymbol(
-            f"_pat{u}_", f'_pat{u}_ = regex.compile(r"""{content}""")'
+            f"_pat{u}_", f'_pat{u}_ = _regex_.compile(r"""{content}""")'
         )
 
     def gen_list(self, ast: "barg.AstList"):
@@ -188,6 +189,7 @@ def _match{u}_(text: str):
         ast_matcher = self.match_functions[ast.expression]
         if ast.mode == "greedy":
             code = f"""\
+# generated from barg grammar line {ast.line}
 def _match{u}_(text: str, matched_exprs=None):
     if matched_exprs is None:
         matched_exprs = []
@@ -206,6 +208,7 @@ def _match{u}_(text: str, matched_exprs=None):
 """
         else:
             code = f"""\
+# generated from barg grammar line {ast.line}
 def _match{u}_(text: str, matched_exprs=None):
     if matched_exprs is None:
         matched_exprs = []
@@ -299,6 +302,7 @@ def _match{u}_(text: str, matched_exprs=None):
         self.match_functions[
             ast
         ].code = f"""\
+# generated from barg grammar line {ast.line}
 def _match{u}_(text: str):
     transform = _TRANSFORMS_["{ast.name}"]
     for m, ncons in {matcher.name}(text):
@@ -321,6 +325,7 @@ def _match{u}_(text: str):
         self.class_defs[ast] = PyCGInternalGenSymbol(
             f"_Ty{u}_",
             f"""\
+# generated from barg grammar line {ast.line}
 class _Ty{u}_:
     def __init__(self, tag: str, value):
         self.type_ = 1
@@ -346,6 +351,7 @@ class _Ty{u}_:
         self.match_functions[
             ast
         ].code = f"""\
+# generated from barg grammar line {ast.line}
 def _match{u}_(text: str):
 {indent(loops)}
 """
@@ -371,6 +377,7 @@ def _match{u}_(text: str):
         self.class_defs[ast] = PyCGInternalGenSymbol(
             f"_Ty{u}_",
             f"""\
+# generated from barg grammar line {ast.line}
 class _Ty{u}_:
     def __init__(self, {field_args}):
         self.type_ = 0
@@ -392,6 +399,7 @@ class _Ty{u}_:
         self.match_functions[
             ast
         ].code = f"""\
+# generated from barg grammar line {ast.line}
 def _match{u}_(text: str):
 {indent(nested_fors)}
 """
