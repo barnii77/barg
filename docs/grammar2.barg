@@ -1,3 +1,4 @@
+# TODO this grammar doesn't actually parse operations correctly. a / b * c gets parsed as div(a, mul(b, c)) instead of mul(div(a, b), c).
 # This grammar uses syntax sugar where you really shouldn't use it, since the syntax sugar auto-generates bad field names and no enum tags.
 # In an actual language parser, you should replace some of the (a | b) patterns with explicit enums and some of the (a b) sequences with structs.
 # This is what the "language" parsed looks like:

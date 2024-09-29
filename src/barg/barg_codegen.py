@@ -15,6 +15,10 @@ class CodeGenerator:
         self.mod = mod
         self.uid = 0
 
+    @staticmethod
+    def preprocess_pattern(pattern: str) -> str:
+        return "^" + pattern
+
     def next_uid(self) -> int:
         u = self.uid
         self.uid += 1
@@ -128,6 +132,8 @@ class PythonCodeGenerator(CodeGenerator):
         head = (
             """\
 import regex
+from enum import Enum as _Enum_
+from typing import Any as _Any_, Dict as _Dict_, Callable as _Callable_
 
 _TRANSFORMS_ = {}
 
@@ -136,14 +142,42 @@ def _wrap_in_parsable_type_(func):
     class Ty:
         @staticmethod
         def parse(text: str):
-            return next(func(text))
+            return next(func(text))[0]
 
     return Ty
+
+
+class _GenTyKind_(_Enum_):
+    STRUCT = 0
+    ENUM = 1
 
 
 class _TextString_:
     def __init__(self, value: str):
         self.value = value
+
+
+class _BadGrammarError_(Exception):
+    def __init__(self, msg: str, line: _Optional_[int] = None):
+        super().__init__(line, msg)
+
+
+# It is strongly recommended to pass `None` as the value for parameter `line`.
+class _InternalError_(Exception):
+    def __init__(self, msg: str, line: _Optional_[int] = None):
+        super().__init__(line, msg)
+
+
+def _get_transform_(transforms: _Dict_[str, _Any_], full_name: str) -> _Callable_:
+    path = full_name.split(".")
+    transform = transforms
+    for name in path:
+        if name not in transform:
+            raise _BadGrammarError_(f"usage of unknown transform '{full_name}'")
+        transform = transform[name]
+    if not callable(transform):
+        raise _InternalError_(f"transform {full_name} is a namespace, not a function")
+    return transform
 """
             if head is None
             else head
@@ -162,12 +196,13 @@ class _TextString_:
 
         code = f"""\
 # generated from barg grammar line {ast.line}
+# regex matcher
 def _match{u}_(text: str):
     for m in _pat{u}_.finditer(text, overlapped=True):
         yield m.group(0), m.end(0)
 """
         self.match_functions[ast] = PyCGInternalGenSymbol(f"_match{u}_", code)
-        content = ast.value.replace('"', '\\"')
+        content = self.preprocess_pattern(ast.value).replace('"', '\\"')
         self.glob_assigns[ast] = PyCGInternalGenSymbol(
             f"_pat{u}_", f'_pat{u}_ = _regex_.compile(r"""{content}""")'
         )
@@ -187,16 +222,22 @@ def _match{u}_(text: str):
             self.gen_ast(ast.expression)
 
         ast_matcher = self.match_functions[ast.expression]
-        if ast.mode == "greedy":
+        end_cond = (
+            f"""\
+    if len(matched_exprs) >= {ast.range_end}:
+        return"""
+            if ast.range_end is not None
+            else ""
+        )
+
+        if ast.mode == "lazy":
             code = f"""\
 # generated from barg grammar line {ast.line}
+# lazy list matcher
 def _match{u}_(text: str, matched_exprs=None):
     if matched_exprs is None:
         matched_exprs = []
-
-    if {ast.range_end} is not None and len(matched_exprs) >= {ast.range_end}:
-        return
-
+{end_cond}
     if {ast.range_start} <= len(matched_exprs):
         yield matched_exprs, 0
 
@@ -209,13 +250,11 @@ def _match{u}_(text: str, matched_exprs=None):
         else:
             code = f"""\
 # generated from barg grammar line {ast.line}
+# greedy list matcher
 def _match{u}_(text: str, matched_exprs=None):
     if matched_exprs is None:
         matched_exprs = []
-
-    if {ast.range_end} is not None and len(matched_exprs) >= {ast.range_end}:
-        return
-
+{end_cond}
     for local_m, local_ncons in {ast_matcher.name}(text):
         for m, ncons in _match{u}_(
             text[local_ncons:], matched_exprs + [local_m]
@@ -303,8 +342,9 @@ def _match{u}_(text: str, matched_exprs=None):
             ast
         ].code = f"""\
 # generated from barg grammar line {ast.line}
+# transform matcher
 def _match{u}_(text: str):
-    transform = _TRANSFORMS_["{ast.name}"]
+    transform = _get_transform_(_TRANSFORMS_, r"{ast.name}")
     for m, ncons in {matcher.name}(text):
         yield transform(m, {', '.join(args_str)}), ncons
 """
@@ -326,15 +366,16 @@ def _match{u}_(text: str):
             f"_Ty{u}_",
             f"""\
 # generated from barg grammar line {ast.line}
+# enum type
 class _Ty{u}_:
     def __init__(self, tag: str, value):
-        self.type_ = 1
+        self.type_ = _GenTyKind_.ENUM
         self.tag = tag
         self.value = value
 
     @staticmethod
     def parse(text: str):
-        return next(_match{u}_(text))
+        return next(_match{u}_(text))[0]
 """,
         )
 
@@ -352,6 +393,7 @@ class _Ty{u}_:
             ast
         ].code = f"""\
 # generated from barg grammar line {ast.line}
+# enum matcher
 def _match{u}_(text: str):
 {indent(loops)}
 """
@@ -378,28 +420,33 @@ def _match{u}_(text: str):
             f"_Ty{u}_",
             f"""\
 # generated from barg grammar line {ast.line}
+# struct type
 class _Ty{u}_:
     def __init__(self, {field_args}):
-        self.type_ = 0
+        self.type_ = _GenTyKind_.STRUCT
         {field_assigns}
 
     @staticmethod
     def parse(text: str):
-        return next(_match{u}_(text))
+        return next(_match{u}_(text))[0]
 """,
         )
 
         # generate the matching function
-        nested_fors = f"yield _Ty{u}_({', '.join('local_m' + str(i) for i in range(len(ast.fields)))}), {' + '.join('local_ncons' + str(i) for i in range(len(ast.fields)))}"
+        def get_local_ncons_up_to(n):
+            return " + ".join("local_ncons" + str(i) for i in range(n))
+
+        nested_fors = f"yield _Ty{u}_({', '.join('local_m' + str(i) for i in range(len(ast.fields)))}), {get_local_ncons_up_to(len(ast.fields))}"
         for i, (_, expr) in reversed(list(enumerate(ast.fields))):
             if expr not in self.match_functions:
                 self.gen_ast(expr)
-            nested_fors = f"for local_m{i}, local_ncons{i} in {self.match_functions[expr].name}(text):\n{indent(nested_fors)}"
+            nested_fors = f"for local_m{i}, local_ncons{i} in {self.match_functions[expr].name}(text{('[' + get_local_ncons_up_to(i) + ':]') if i > 0 else ''}):\n{indent(nested_fors)}"
 
         self.match_functions[
             ast
         ].code = f"""\
 # generated from barg grammar line {ast.line}
+# struct matcher
 def _match{u}_(text: str):
 {indent(nested_fors)}
 """

@@ -10,7 +10,7 @@ def _wrap_in_parsable_type_(func):
     class Ty:
         @staticmethod
         def parse(text: str):
-            return next(func(text))
+            return next(func(text))[0]
 
     return Ty
 
@@ -108,7 +108,7 @@ def _builtin_filter_(m, mark: str):
     return list(filter(lambda item: hasattr(item, f"mark_{mark}_"), m))
 
 
-def _builtin_pyexpr_(m, pyexpr: "_TextString_ | str | Any", *args):
+def _builtin_pyexpr_(m, pyexpr: "_TextString_ | str | _Any_", *args):
     if not pyexpr or not isinstance(pyexpr, (_TextString_, str)):
         raise _BadGrammarError_(
             f"pyexpr '{pyexpr}' is invalid, pyexpr must be a non-empty text string or variable"
@@ -127,7 +127,7 @@ def _builtin_pyexpr_(m, pyexpr: "_TextString_ | str | Any", *args):
     return eval(code, {"x": m, "args": args})
 
 
-def _builtin_pyscript_(m, pyscript: "_TextString_ | str | Any", *args):
+def _builtin_pyscript_(m, pyscript: "_TextString_ | str | _Any_", *args):
     if not pyscript or not isinstance(pyscript, (_TextString_, str)):
         raise _BadGrammarError_(
             f"pyscript '{pyscript}' is invalid, pyscript must be a non-empty text string or variable"
