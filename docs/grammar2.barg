@@ -1,4 +1,4 @@
-# TODO this grammar doesn't actually parse operations correctly. a / b * c gets parsed as div(a, mul(b, c)) instead of mul(div(a, b), c).
+# TODO this grammar doesn't actually parse operations correctly. a / b * c doesn't match
 # This grammar uses syntax sugar where you really shouldn't use it, since the syntax sugar auto-generates bad field names and no enum tags.
 # In an actual language parser, you should replace some of the (a | b) patterns with explicit enums and some of the (a b) sequences with structs.
 # This is what the "language" parsed looks like:
@@ -21,42 +21,42 @@ LineOpTerm := Term | PointOp;
 
 AddOp := struct {
   a: LineOpTerm,
-  "\s*",
+  " *",
   op: "\+",
-  "\s*",
-  b: Expr
+  " *",
+  b: LineOp | LineOpTerm
 };
 
 SubOp := struct {
   a: LineOpTerm,
-  "\s*",
+  " *",
   op: "-",
-  "\s*",
-  b: Expr
+  " *",
+  b: LineOpTerm
 };
 
 MulOp := struct {
   a: PointOpTerm,
-  "\s*",
+  " *",
   op: "\*",
-  "\s*",
-  b: PointOpTerm | PointOp
+  " *",
+  b: PointOp | PointOpTerm
 };
 
 DivOp := struct {
   a: PointOpTerm,
-  "\s*",
+  " *",
   op: "/",
-  "\s*",
-  b: PointOpTerm | PointOp
+  " *",
+  b: PointOpTerm
 };
 
 ModOp := struct {
   a: PointOpTerm,
-  "\s*",
+  " *",
   op: "%",
-  "\s*",
-  b: PointOpTerm | PointOp
+  " *",
+  b: PointOpTerm
 };
 
 PointOp := MulOp | DivOp | ModOp;
@@ -65,7 +65,7 @@ LineOp := AddOp | SubOp;
 
 Expr := PointOp | LineOp | Term;
 
-AssignableExpr := (Var "\s*:=\s*")? Expr;
+AssignableExpr := (Var " *:= *")? Expr;
 
-Statement := AssignableExpr "\s*\n\s*";
+Statement := AssignableExpr " *\n *";
 Toplevel := Statement*;
