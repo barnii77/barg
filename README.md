@@ -6,7 +6,7 @@ A little less than half of the code was written on my phone while traveling, the
 
 # how to install
 ## install from pypi
-you can install from PyPI like this: `pip install barg`.
+you can install from PyPI like this: `pip install barnii77-barg`.
 
 ## install from local clone of project
 download the project. in the project root (directory where this file is located), run `python setup.py sdist && pip install -r requirements.txt && pip install .`. this will create some directories which you can safely delete.
