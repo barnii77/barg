@@ -346,7 +346,7 @@ def _match{u}_(text: str, matched_exprs=None):
 def _match{u}_(text: str):
     transform = _get_transform_(_TRANSFORMS_, r"{ast.name}")
     for m, ncons in {matcher.name}(text):
-        yield transform(m, {', '.join(args_str)}), ncons
+        yield transform(text, ncons, m, {', '.join(args_str)})
 """
 
     def gen_enum(self, ast: "barg.AstEnum"):

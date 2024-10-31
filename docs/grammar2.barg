@@ -1,7 +1,7 @@
-# TODO this grammar doesn't actually parse operations correctly. a / b * c doesn't match
+# TODO this grammar doesn't actually parse operations correctly. The expression a / b * c doesn't match. More on this below.
 # This grammar uses syntax sugar where you really shouldn't use it, since the syntax sugar auto-generates bad field names and no enum tags.
 # In an actual language parser, you should replace some of the (a | b) patterns with explicit enums and some of the (a b) sequences with structs.
-# This is what the "language" parsed looks like:
+# This is what the "language" parsed by this grammar looks like:
 # a := 4
 # x := 2 * 3 + 4
 # y := (z := x * 4 + 5) / x * a
@@ -34,6 +34,8 @@ SubOp := struct {
   " *",
   b: LineOpTerm
 };
+
+# TODO the ops below (MulOp, DivOp, ModOp) do not support having multiple of them in a row at the moment (ie writing a / b * c or similar does not work)
 
 MulOp := struct {
   a: PointOpTerm,

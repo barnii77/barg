@@ -4,8 +4,6 @@ import barg
 from enum import Enum, auto
 from typing import Iterable, Dict, List, Tuple, Any, Optional, Generator
 
-# TODO better python parser code generation
-
 
 # It is strongly recommended to pass `None` as the value for parameter `line`.
 class BadGrammarError(Exception):
@@ -418,7 +416,7 @@ class AstTransform(AstNode):
         transform = barg.get_transform(module.barg_transforms, self.name)
         for pattern_arg, ncons in self.pattern_arg.match(string, module):
             try:
-                yield transform(module, pattern_arg, *self.args), ncons
+                yield transform(module, string, ncons, pattern_arg, *self.args)
             except Exception as e:
                 e.__barg_line = self.line  # attach barg grammar line info
                 raise e

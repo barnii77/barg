@@ -46,7 +46,7 @@ def mark_line_in_grammar(grammar: str, lineno: int) -> str:
 
 def barg_test(args):
     print(
-        "Please use `PYTHONPATH=src python -m unittest barg.tests` to run all unit-tests from the barg project root directory. To run them for the installed package, use `python -m unittest barg.tests`. To run only a subset of all tests, use `barg.tests.{Exec,CodeGen}` or `barg.tests.{Exec,CodeGen}.test123`. Example: `python -m unittest barg.tests.Exec.test1`."
+        "Please use `PYTHONPATH=src python -m unittest tests` to run all unit-tests from the barg project root directory. To run them for the installed package, use `python -m unittest barg.tests`. To run only a subset of all tests, use `barg.tests.{Exec,CodeGen}` or `barg.tests.{Exec,CodeGen}.test123`. Example: `python -m unittest barg.tests.Exec.test1`."
     )
 
 

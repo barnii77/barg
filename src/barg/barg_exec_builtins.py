@@ -3,7 +3,7 @@ from typing import Optional, Any, Dict, Callable
 
 
 # NOTE: '|Any ' in field so it can be called in non-type-safe way from other places
-def builtin_take(module, m, field: Optional[str] | Any = None):
+def builtin_take(module, text: str, ncons: int, m, field: Optional[str] | Any = None):
     if field is not None and not isinstance(field, str):
         raise barg.BadGrammarError(
             f"the field parameter of the take builtin must be an identifier or unprovided, not {type(field)}",
@@ -17,30 +17,30 @@ def builtin_take(module, m, field: Optional[str] | Any = None):
             raise barg.BadGrammarError(
                 "if take is applied to a struct, it takes a field parameter in the form $take(expr, fieldname123) where fieldname123 (without quotes) is the fieldname",
             )
-        return getattr(m, field)
+        return getattr(m, field), ncons
     elif m.type_ == barg.GenTyKind.ENUM:
-        return getattr(m, "value")
+        return getattr(m, "value"), ncons
     else:
         raise barg.InternalError("invalid value of 'type_' encountered in take")
 
 
-def builtin_int(module, m):
+def builtin_int(module, text: str, ncons: int, m):
     if not isinstance(m, str):
         raise barg.BadGrammarError(
             f"the match parameter of the int builtin must be a string match, not type {type(m)}",
         )
-    return int(m)
+    return int(m), ncons
 
 
-def builtin_float(module, m):
+def builtin_float(module, text: str, ncons: int, m):
     if not isinstance(m, str):
         raise barg.BadGrammarError(
             f"the match parameter of the int builtin must be a string match, not type {type(m)}",
         )
-    return float(m)
+    return float(m), ncons
 
 
-def builtin_delete(module, m, field: Optional[str] | Any = None):
+def builtin_delete(module, text: str, ncons: int, m, field: Optional[str] | Any = None):
     if field is not None and not isinstance(field, str):
         raise barg.BadGrammarError(
             f"the field parameter of the delete builtin must be an identifier or unprovided, not {type(field)}",
@@ -56,29 +56,31 @@ def builtin_delete(module, m, field: Optional[str] | Any = None):
             m.value = None
     else:
         raise barg.InternalError("invalid value of 'type_' encountered in delete")
-    return m
+    return m, ncons
 
 
-def builtin_mark(module, m, mark: str):
+def builtin_mark(module, text: str, ncons: int, m, mark: str):
     if not mark or not isinstance(mark, str):
         raise barg.BadGrammarError(
             f"mark '{mark}' is invalid, mark must be a non-empty string"
         )
     setattr(m, f"mark_{mark}_", None)
-    return m
+    return m, ncons
 
 
-def builtin_filter(module, m, mark: str):
+def builtin_filter(module, text: str, ncons: int, m, mark: str):
     if not mark or not isinstance(mark, str):
         raise barg.BadGrammarError(
             f"mark '{mark}' is invalid, mark must be a non-empty string"
         )
     if not isinstance(m, list):
         raise barg.BadGrammarError(f"filter builtin applied to non-list object {m}")
-    return list(filter(lambda item: hasattr(item, f"mark_{mark}_"), m))
+    return list(filter(lambda item: hasattr(item, f"mark_{mark}_"), m)), ncons
 
 
-def builtin_pyexpr(module, m, pyexpr: "barg.AstTextString | str | Any", *args):
+def builtin_pyexpr(
+    module, text: str, ncons: int, m, pyexpr: "barg.AstTextString | str | Any", *args
+):
     if not pyexpr or not isinstance(pyexpr, (barg.AstTextString, str)):
         raise barg.BadGrammarError(
             f"pyexpr '{pyexpr}' is invalid, pyexpr must be a non-empty text string or variable"
@@ -94,10 +96,20 @@ def builtin_pyexpr(module, m, pyexpr: "barg.AstTextString | str | Any", *args):
                 f"variable '{pyexpr}' does not refer to a text string (but has to)"
             )
         code = defn.value
-    return eval(code, {"module": module, "x": m, "args": args, "barg": barg})
+    globs = {
+        "module": module,
+        "x": m,
+        "args": args,
+        "barg": barg,
+        "text": text,
+        "ncons": ncons,
+    }
+    return eval(code, globs), globs["ncons"]
 
 
-def builtin_pyscript(module, m, pyscript: "barg.AstTextString | str | Any", *args):
+def builtin_pyscript(
+    module, text: str, ncons: int, m, pyscript: "barg.AstTextString | str | Any", *args
+):
     if not pyscript or not isinstance(pyscript, (barg.AstTextString, str)):
         raise barg.BadGrammarError(
             f"pyscript '{pyscript}' is invalid, pyscript must be a non-empty text string or variable"
@@ -113,9 +125,16 @@ def builtin_pyscript(module, m, pyscript: "barg.AstTextString | str | Any", *arg
                 f"variable '{pyscript}' does not refer to a text string (but has to)"
             )
         code = defn.value
-    globs = {"module": module, "x": m, "args": args, "barg": barg}
+    globs = {
+        "module": module,
+        "x": m,
+        "args": args,
+        "barg": barg,
+        "text": text,
+        "ncons": ncons,
+    }
     exec(code, globs)
-    return globs["x"]
+    return globs["x"], globs["ncons"]
 
 
 def insert_transform(transforms: Dict[str, Any], full_name: str, function: Callable):
