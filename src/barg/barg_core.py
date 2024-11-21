@@ -308,6 +308,7 @@ class AstStruct(AstNode):
                 field_assigns = ("\n" + " " * 8).join(
                     map(lambda name: f"self.{name} = {name}", field_names)
                 )
+                field_names_printed = field_names if barg.PRINT_PRIVATE_STRUCT_MEMBERS else [f for f in field_names if not f.startswith('_')]
                 code = f"""\
 class BargGeneratedType:
     def __init__(self, {field_args}):
@@ -321,7 +322,7 @@ class BargGeneratedType:
             lambda name: name + ': {quote if isinstance(self.' + name + ', str) else empty}'
                 + '{self.' + name + '}'
                 + '{quote if isinstance(self.' + name + ', str) else empty}',
-            field_names
+            field_names_printed
         ))}}}}}'
 
     def __repr__(self):

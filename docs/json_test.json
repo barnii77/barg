@@ -1,0 +1,12 @@
+{
+    "int": 1,
+    "float": 3.3,
+    "bool": true,
+    "Null..#": null,
+    "dict": {
+        "inner": "hello",
+        "innerList": ["hi", {"int": 3}]
+    },
+    "list": [12, 4.4, null],
+    "one_item": [true]
+}

@@ -1,0 +1,43 @@
+# an entire JSON parser in just 40 lines of readable grammar (if you know regex)
+
+Whitespace := "\s*\n*\s*";
+String := $builtin.pyexpr("\"([^\"]|(\\\"))*\"", `x[1:-1]`);
+Int := $builtin.int("-?\d+");
+Float := $builtin.float("-?\d+\.\d+");
+Bool := $builtin.pyexpr("true|false", `bool(x.capitalize())`);
+Null := $builtin.pyexpr("null", `None`);
+
+Key := String;
+Value := String | Float | Int | Bool | Null | Dict | List;
+
+Item := struct {
+    Whitespace,
+    key: Key,
+    "\s*:\s*",
+    value: Value,
+    Whitespace
+};
+
+FilterItemsList := `([i._0 for i in x[0]._0] + [x[0]._1]) if x else []`;
+
+Dict := struct {
+    Whitespace,
+    "\{",
+    Whitespace,
+    items: $builtin.pyexpr(((Item Whitespace "," Whitespace)* Item)?, FilterItemsList),
+    Whitespace,
+    "\}",
+    Whitespace
+};
+
+List := struct {
+    Whitespace,
+    "\[",
+    Whitespace,
+    values:  $builtin.pyexpr(((Value Whitespace "," Whitespace)* Value)?, FilterItemsList),
+    Whitespace,
+    "\]",
+    Whitespace
+};
+
+Json := Dict | List;

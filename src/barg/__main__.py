@@ -51,6 +51,7 @@ def barg_test(args):
 
 
 def barg_exec(args):
+    barg.PRINT_PRIVATE_STRUCT_MEMBERS = args.print_private_struct_members
     if args.max_recursion_limit:
         sys.setrecursionlimit(args.max_recursion_limit)
     if not os.path.exists(args.text_file) or not os.path.isfile(args.text_file):
@@ -141,6 +142,7 @@ if __name__ == "__main__":
     bex.add_argument("--toplevel-name", "-tn", default="Toplevel")
     bex.add_argument("--max-recursion-limit", "-rec", type=int, default=None)
     bex.add_argument("--backtrace-len-limit", "-btlen", type=int, default=None)
+    bex.add_argument("--print-private-struct-members", "-ppsm", action="store_true")
 
     bcg.add_argument("grammar")
     bcg.add_argument("--outfile", "-o", default="barg_generated_parser.py")

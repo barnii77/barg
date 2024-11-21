@@ -1,0 +1,6 @@
+name = 1;
+second_var = name;
+name 245;
+third_var = 256;
+v4 = second_var;
+

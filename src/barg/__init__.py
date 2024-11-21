@@ -33,3 +33,4 @@ from .barg_codegen import (
     CodeGenerator,
     PythonCodeGenerator,
 )
+PRINT_PRIVATE_STRUCT_MEMBERS = True
